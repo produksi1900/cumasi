@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FetSipedas Web</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+
+  <!-- ================= LOGIN VIEW ================= -->
+  <div id="view-login" class="login-wrap">
+    <div class="login-card">
+      <h1>FetSipedas</h1>
+      <p class="sub">Asisten Data Sipedas Hortikultura — Bangka Belitung</p>
+
+      <label for="in-username">Username</label>
+      <input type="text" id="in-username" placeholder="mis. prov atau bps1901" autocomplete="username">
+
+      <label for="in-password">Password</label>
+      <input type="password" id="in-password" placeholder="Password" autocomplete="current-password">
+
+      <div class="chk">
+        <input type="checkbox" id="chk-show-pass">
+        <label for="chk-show-pass" style="margin:0;">Tampilkan password</label>
+      </div>
+
+      <button class="btn-login" id="btn-login">Masuk</button>
+      <div class="pesan-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ================= APP VIEW ================= -->
+  <div id="view-app" class="hidden">
+    <div class="header">
+      <span class="judul">FetSipedas</span>
+      <span class="subjudul">Asisten Data Sipedas Hortikultura</span>
+      <div class="spacer"></div>
+      <span class="user-info" id="lbl-user"></span>
+      <button class="logout" id="btn-logout">Keluar</button>
+    </div>
+
+    <div class="info-bar" id="info-terakhir">Memuat info data terakhir...</div>
+
+    <div class="app-shell">
+      <!-- ---------- PANEL KIRI: Download (khusus prov) ---------- -->
+      <div class="panel-kiri" id="panel-download">
+        <div class="section-label">Download Data (Provinsi)</div>
+
+        <div class="field">
+          <label>Tahun</label>
+          <select id="sel-tahun-download"></select>
+        </div>
+
+        <div class="grid-tombol-sph">
+          <button class="btn-sph sbs" id="btn-dl-sbs">⬇ SPH-SBS<br>Tabulasi Komoditi</button>
+          <button class="btn-sph bst" id="btn-dl-bst">⬇ SPH-BST<br>Tabulasi Komoditi</button>
+          <button class="btn-sph tbf" id="btn-dl-tbf">⬇ SPH-TBF<br>Tabulasi Komoditi</button>
+          <button class="btn-sph th"  id="btn-dl-th">⬇ SPH-TH<br>Tabulasi Komoditi</button>
+        </div>
+
+        <div class="progress-bar"><div class="isi" id="progress-download"></div></div>
+        <div class="log-box" id="log-download">Menunggu perintah download...</div>
+      </div>
+
+      <!-- ---------- PANEL KANAN: Rekon ---------- -->
+      <div class="panel-kanan">
+        <div class="section-label">Rekonsiliasi Data</div>
+
+        <div class="rekon-slicer">
+          <div class="field">
+            <label>Jenis SPH</label>
+            <select id="sel-jenis">
+              <option value="sbs">SPH-SBS</option>
+              <option value="bst">SPH-BST</option>
+              <option value="tbf">SPH-TBF</option>
+              <option value="th">SPH-TH</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tahun</label>
+            <select id="sel-tahun-rekon"></select>
+          </div>
+          <div class="field">
+            <label>Kabupaten</label>
+            <select id="sel-kab"></select>
+          </div>
+          <div class="field">
+            <label>Komoditi</label>
+            <select id="sel-komoditi"></select>
+          </div>
+        </div>
+
+        <div class="tab-bar" id="tab-bar"></div>
+
+        <div id="rekon-area">
+          <div class="placeholder-kosong">Pilih jenis SPH, tahun, kabupaten & komoditi untuk mulai.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
