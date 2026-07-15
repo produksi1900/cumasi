@@ -122,12 +122,15 @@ async function masukKeApp() {
   // ---- Buka kunci Section 2 & 3 ----
   bukaKunci(true);
 
-  // Panel download cuma utk role prov
-  const gridDownload = document.querySelector("#panel-download .grid-tombol-sph");
+  // Panel download cuma utk role prov (kabkot gak bisa konek ke web
+  // sipedas asli, jadi tombolnya disembunyikan total, bukan cuma dikunci)
+  const tombolDownload = ["sbs", "bst", "tbf", "th"].map((j) => $(`btn-dl-${j}`));
   if (profile.role !== "prov") {
     $("panel-download").classList.add("hidden");
+    tombolDownload.forEach((b) => (b.disabled = true));
   } else {
     $("panel-download").classList.remove("hidden");
+    tombolDownload.forEach((b) => (b.disabled = false));
   }
 
   isiPilihanTahun($("sel-tahun-download"));
@@ -147,6 +150,8 @@ function keluarDariApp() {
   $("blok-connected").classList.add("hidden");
   setLampuKoneksi(false);
   bukaKunci(false);
+
+  ["sbs", "bst", "tbf", "th"].forEach((j) => { $(`btn-dl-${j}`).disabled = true; });
 
   $("in-username").value = "";
   $("in-password").value = "";
