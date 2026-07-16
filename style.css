@@ -193,7 +193,8 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 }
 .tabel-judul .satuan { font-style: italic; font-weight: normal; font-size: 11px; }
 
-table.tabel-rekon { border-collapse: collapse; width: 100%; font-size: 12px; }
+.tabel-blok { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.tabel-rekon { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 600px; }
 table.tabel-rekon th, table.tabel-rekon td {
   border: 1px solid #ddd; padding: 4px 6px; text-align: center;
 }
@@ -201,7 +202,7 @@ table.tabel-rekon th { background: var(--hijau-muda); color: var(--putih); }
 table.tabel-rekon td.nama { text-align: left; }
 table.tabel-rekon tr:nth-child(even) td { background: #f8f8f8; }
 table.tabel-rekon td.outlier { background: #fff176 !important; font-weight: bold; }
-table.tabel-rekon td.outlier-rata { background: #fffacd !important; font-weight: bold; }
+table.tabel-rekon td.outlier-rata { background: #fff176 !important; font-weight: bold; }
 
 .chart-wrap { background: var(--putih); border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 20px; }
 .chart-wrap h4 { margin: 0 0 8px; font-size: 13px; color: var(--hijau-tua); }
@@ -216,5 +217,36 @@ table.tabel-rekon td.outlier-rata { background: #fffacd !important; font-weight:
   body { display: block; }
   .app-shell { flex-direction: column; }
   .panel-kiri { width: 100%; border-right: none; border-bottom: 1px solid #ddd; overflow-y: visible; }
-  .panel-kanan { overflow-y: visible; }
+  .panel-kanan { overflow-y: visible; padding: 10px; }
+
+  .header {
+    height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 4px;
+  }
+  .header .judul { font-size: 14px; }
+  .header .subjudul { font-size: 10px; margin-left: 0; flex-basis: 100%; }
+  .header .user-info { font-size: 11px; margin-right: 6px; }
+  .header button.logout { padding: 4px 8px; font-size: 11px; }
+
+  .info-bar { font-size: 11px; padding: 5px 12px; }
+
+  .panel-kiri { padding: 12px; }
+
+  .rekon-slicer { flex-direction: column; align-items: stretch; gap: 8px; }
+  .rekon-slicer .field { min-width: 0; }
+
+  .tab-bar { flex-wrap: wrap; }
+  .tab-btn { padding: 6px 10px; font-size: 11px; }
+
+  .tabel-judul { flex-direction: column; align-items: flex-start; gap: 2px; }
+
+  .chart-wrap { padding: 8px; }
+  .chart-wrap canvas { max-height: 260px; }
+
+  .overlay-terkunci { font-size: 12px; padding: 14px; }
+}
+
+@media (max-width: 480px) {
+  .splash-logo { width: 80px; height: 80px; }
+  table.tabel-rekon { font-size: 11px; min-width: 520px; }
+  table.tabel-rekon th, table.tabel-rekon td { padding: 3px 5px; }
 }

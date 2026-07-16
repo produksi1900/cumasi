@@ -596,7 +596,7 @@ function pivotKec(rows) {
   return Array.from(kecMap.values()).sort((a, b) => a.urut - b.urut);
 }
 
-// Tabel kecamatan x periode, dgn kolom Mean & Stdev, highlight outlier
+// Tabel kecamatan x periode, dgn kolom Mean, highlight outlier
 // (IQR method persis spt desktop fitur_rekon.py: _iqr_bounds/_is_outlier,
 // nilai 0 diabaikan, minimal 4 nilai valid).
 function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerLabels, desimal = 2 }) {
@@ -610,7 +610,7 @@ function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerL
 
   const table = document.createElement("table");
   table.className = "tabel-rekon";
-  const theadCols = ["No", "Kode", "Kecamatan", ...headerLabels, "Mean", "Stdev"];
+  const theadCols = ["No", "Kode", "Kecamatan", ...headerLabels, "Mean"];
   table.innerHTML = `<thead><tr>${theadCols.map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
 
   const tbody = document.createElement("tbody");
@@ -626,8 +626,7 @@ function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerL
     }
     const nz = rowVals.filter((v) => v !== 0);
     const mean = nz.length ? nz.reduce((a, b) => a + b, 0) / nz.length : 0;
-    const std = nz.length > 1 ? Math.sqrt(nz.reduce((a, b) => a + (b - mean) ** 2, 0) / nz.length) : 0;
-    tds += `<td>${fmt(mean, desimal)}</td><td>${nz.length > 1 ? fmt(std, desimal + 1) : "-"}</td>`;
+    tds += `<td>${fmt(mean, desimal)}</td>`;
     tr.innerHTML = tds;
     tbody.appendChild(tr);
   });
@@ -638,8 +637,10 @@ function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerL
 
 // Tabel "Rata-Rata ... menurut Kabupaten & Bulan/Triwulan" — satu baris
 // per kabupaten (SEMUA 7 kab, bukan cuma yg dipilih), nilainya rata-rata
-// antar kecamatan per periode. Outlier dihitung per-baris (per kab),
-// persis logic desktop _tulis_tabel_rata2_prov/_simple.
+// antar kecamatan per periode. Outlier dihitung GLOBAL dari semua cell
+// yang ada nilainya di tabel ini (semua kab x semua periode), nilai
+// null/kosong tidak ikut dihitung — sama seperti logic buatTabelKecPeriode,
+// dan pakai class warna "outlier" yang sama.
 function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabels, desimal = 2 }) {
   const labelAxis = cfg.periodeCol === "triwulan" ? "Triwulan" : "Bulan";
   const blok = document.createElement("div");
@@ -652,6 +653,7 @@ function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabe
   const tbody = document.createElement("tbody");
 
   const perKabAvg = {}; // kab.id -> [rata2 per periode]
+  const semuaNilai = []; // gabungan semua nilai valid (non-null) di seluruh tabel ini
 
   for (const kab of DAFTAR_KAB_BABEL) {
     const rowsKabIni = rowsSemua.filter((r) => r.nama_kab === kab.id);
@@ -666,18 +668,27 @@ function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabe
     for (let p = 1; p <= nPeriode; p++) {
       const vals = kecKeys.map((kid) => matrix.get(`${kid}|${p}`) ?? 0);
       const nz = vals.filter((v) => v !== 0);
-      rataPerPeriode.push(nz.length ? nz.reduce((a, b) => a + b, 0) / nz.length : null);
+      const rata = nz.length ? nz.reduce((a, b) => a + b, 0) / nz.length : null;
+      rataPerPeriode.push(rata);
+      if (rata !== null) semuaNilai.push(rata);
     }
     perKabAvg[kab.id] = rataPerPeriode;
+  }
 
-    const nonZero = rataPerPeriode.filter((v) => v !== null && v !== 0);
-    const [lo, hi] = iqrBounds(nonZero);
+  // Bounds outlier dihitung sekali dari SEMUA cell (bukan per baris)
+  const [lo, hi] = iqrBounds(semuaNilai);
 
+  for (const kab of DAFTAR_KAB_BABEL) {
+    const rataPerPeriode = perKabAvg[kab.id];
     const tr = document.createElement("tr");
     let tds = `<td class="nama">${kab.nama}</td>`;
     rataPerPeriode.forEach((v) => {
-      const cls = v !== null && isOutlier(v, lo, hi) ? " outlier-rata" : "";
-      tds += `<td class="${cls}">${v === null ? "-" : fmt(v, desimal)}</td>`;
+      if (v === null) {
+        tds += `<td>-</td>`;
+      } else {
+        const outlierCls = isOutlier(v, lo, hi) ? " outlier" : "";
+        tds += `<td class="${outlierCls}">${fmt(v, desimal)}</td>`;
+      }
     });
     tr.innerHTML = tds;
     tbody.appendChild(tr);
