@@ -20,16 +20,16 @@ export const SPH_CONFIG = {
     judulPeriode: "Bulan",
     tabs: [
       { key: "provitas_habis", label: "Provitas Habis", satuan: "Kw/Ha",
-        // PENTING (fix bug 100x): data mentah di DB satuannya Kg & M2,
-        // tapi provitas harus Kuintal/Ha. (Kg/100) / (M2/10000) = Kg/M2 * 100
-        // -> numerFactor 100 di formula numer*factor/denom.
-        numer: "produksi_habis", denom: "luas_panen_habis", numerFactor: 100,
-        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 0.01 },
-        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 0.0001 } },
+        // Produksi Habis & Luas Panen Habis di DB sudah dalam satuan
+        // Kuintal & Ha (sama seperti raw Excel di aplikasi desktop),
+        // jadi provitas = produksi / luas langsung tanpa faktor konversi.
+        numer: "produksi_habis", denom: "luas_panen_habis",
+        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 1 },
+        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 1 } },
       { key: "provitas_belum", label: "Provitas Belum Habis", satuan: "Kw/Ha",
-        numer: "produksi_belum_habis", denom: "luas_panen_belum_habis", numerFactor: 100,
-        rawNumer: { label: "Produksi Belum Habis", satuan: "Kuintal", factor: 0.01 },
-        rawDenom: { label: "Luas Panen Belum Habis", satuan: "Ha", factor: 0.0001 } },
+        numer: "produksi_belum_habis", denom: "luas_panen_belum_habis",
+        rawNumer: { label: "Produksi Belum Habis", satuan: "Kuintal", factor: 1 },
+        rawDenom: { label: "Luas Panen Belum Habis", satuan: "Ha", factor: 1 } },
       { key: "harga", label: "Harga Jual Petani", satuan: "Rp/Kg", single: "harga_jual_petani" },
     ],
     excelCols: {
@@ -52,13 +52,13 @@ export const SPH_CONFIG = {
     judulPeriode: "Triwulan",
     tabs: [
       { key: "provitas_habis", label: "Provitas Habis", satuan: "Kw/Ha",
-        numer: "produksi_habis", denom: "luas_panen_habis", numerFactor: 100,
-        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 0.01 },
-        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 0.0001 } },
+        numer: "produksi_habis", denom: "luas_panen_habis",
+        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 1 },
+        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 1 } },
       { key: "provitas_belum", label: "Provitas Belum Habis", satuan: "Kw/Ha",
-        numer: "produksi_belum_habis", denom: "luas_panen_belum_habis", numerFactor: 100,
-        rawNumer: { label: "Produksi Belum Habis", satuan: "Kuintal", factor: 0.01 },
-        rawDenom: { label: "Luas Panen Belum Habis", satuan: "Ha", factor: 0.0001 } },
+        numer: "produksi_belum_habis", denom: "luas_panen_belum_habis",
+        rawNumer: { label: "Produksi Belum Habis", satuan: "Kuintal", factor: 1 },
+        rawDenom: { label: "Luas Panen Belum Habis", satuan: "Ha", factor: 1 } },
       { key: "harga", label: "Harga Jual Petani", satuan: "Rp/Kg", single: "harga_jual_petani" },
     ],
     excelCols: {
@@ -81,9 +81,9 @@ export const SPH_CONFIG = {
     judulPeriode: "Triwulan",
     tabs: [
       { key: "provitas_habis", label: "Provitas Habis", satuan: "Kw/Ha",
-        numer: "produksi_habis", denom: "luas_panen_habis", numerFactor: 100,
-        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 0.01 },
-        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 0.0001 } },
+        numer: "produksi_habis", denom: "luas_panen_habis",
+        rawNumer: { label: "Produksi Habis", satuan: "Kuintal", factor: 1 },
+        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 1 } },
       { key: "harga", label: "Harga Jual Petani", satuan: "Rp/Kg", single: "harga_jual_petani" },
     ],
     // TH tidak punya "belum habis", tapi kolomnya tetap disertakan di

@@ -107,6 +107,28 @@
           </div>
         </div>
       </div>
+
+      <!-- ===== SECTION 3 (khusus role "prov"): REFERENSI ID TANAMAN =====
+           Upload 1 file Excel berisi sheet "sbs"/"bst"/"tbf"/"th" (kolom
+           idtanaman & namatanaman). Urutan baris di tiap sheet menentukan
+           urutan komoditi di dropdown panel Rekonsiliasi -- persis seperti
+           urutan_referensi id_tanaman_map di aplikasi desktop. Upload akan
+           MENGGANTI referensi lama utk jenis yang ada di file. -->
+      <div id="panel-referensi" class="hidden">
+        <div class="divider"></div>
+        <div class="section-label">3. Referensi ID Tanaman</div>
+        <div class="catatan-kecil" style="margin-top:0;">
+          Upload Excel referensi urutan komoditi (sheet: sbs, bst, tbf, th —
+          kolom "idtanaman" &amp; "namatanaman"). Urutan baris menentukan
+          urutan komoditi di dropdown Rekonsiliasi. File yang diupload
+          MENGGANTI referensi lama untuk jenis yang ada di dalamnya.
+        </div>
+        <div class="field">
+          <input type="file" id="in-file-referensi" accept=".xlsx,.xls">
+        </div>
+        <button class="btn-login" id="btn-upload-referensi">⬆ Upload Referensi</button>
+        <div class="log-box" id="log-referensi">Belum ada file dipilih.</div>
+      </div>
     </div>
 
     <!-- ---------- PANEL KANAN: REKON (disabled sampai login, scroll di sini saja) ---------- -->
@@ -115,7 +137,7 @@
         <span>🔒 Sambungkan akun untuk mulai rekonsiliasi</span>
       </div>
       <div class="isi-terkunci">
-        <div class="section-label">3. Rekonsiliasi Data</div>
+        <div class="section-label">4. Rekonsiliasi Data</div>
 
         <div class="rekon-slicer">
           <div class="field">

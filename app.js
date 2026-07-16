@@ -11,6 +11,7 @@ const state = {
   profile: null,       // {id, username, role, kab_id, nama_tampil}
   tabAktif: null,       // key tab rekon yang sedang dipilih
   chartInstances: [],   // instance-instance Chart.js aktif (di-destroy tiap render ulang)
+  idTanamanUrutan: { sbs: {}, bst: {}, tbf: {}, th: {} }, // jenis -> {namatanaman_lower: urutan}
 };
 
 const TAHUN_AWAL = 2018;
@@ -134,6 +135,10 @@ async function masukKeApp() {
 
   isiPilihanTahun($("sel-tahun-rekon"));
 
+  // ---- Section 3: Referensi ID Tanaman (khusus prov) ----
+  $("panel-referensi").classList.toggle("hidden", profile.role !== "prov");
+
+  await muatReferensiIdTanaman();
   await siapkanKabSelect();
   await muatUlangJenis();
 }
@@ -151,6 +156,9 @@ function keluarDariApp() {
 
   $("btn-download").disabled = true;
   $("wrap-kab-download").classList.add("hidden");
+  $("panel-referensi").classList.add("hidden");
+  $("in-file-referensi").value = "";
+  $("log-referensi").textContent = "Belum ada file dipilih.";
 
   $("in-username").value = "";
   $("in-password").value = "";
@@ -371,6 +379,7 @@ async function siapkanKabSelect() {
     const kab = DAFTAR_KAB_BABEL.find((k) => k.id === state.profile.kab_id);
     selKab.innerHTML = `<option value="${state.profile.kab_id}">${kab ? kab.nama : state.profile.kab_id}</option>`;
     selKab.disabled = true;
+    await siapkanKomoditiSelect();
     return;
   }
 
@@ -401,10 +410,122 @@ async function siapkanKomoditiSelect() {
     selKom.innerHTML = `<option value="">(gagal memuat)</option>`;
     return;
   }
-  const unik = Array.from(new Set(data.map((r) => r.namatanaman))).sort();
+  const unik = Array.from(new Set(data.map((r) => r.namatanaman)));
+
+  // Urutkan sesuai referensi id_tanaman (Section 3, diupload role prov),
+  // persis seperti urutan_referensi di fitur_sbs.py (desktop). Komoditi
+  // yang belum ada di referensi ditaruh di paling akhir, alfabetis.
+  const urutanMap = state.idTanamanUrutan[jenis] || {};
+  unik.sort((a, b) => {
+    const ua = urutanMap[normalisasiNamaTanaman(a)];
+    const ub = urutanMap[normalisasiNamaTanaman(b)];
+    if (ua !== undefined && ub !== undefined) return ua - ub;
+    if (ua !== undefined) return -1;
+    if (ub !== undefined) return 1;
+    return a.localeCompare(b, "id");
+  });
+
   selKom.innerHTML = unik.length
     ? unik.map((n) => `<option value="${n}">${n}</option>`).join("")
     : `<option value="">(tidak ada komoditi)</option>`;
+}
+
+function normalisasiNamaTanaman(n) {
+  return String(n ?? "").trim().toLowerCase();
+}
+
+// ============================================================
+// SECTION 3: REFERENSI ID TANAMAN (khusus role "prov")
+// ============================================================
+// Urutan baris di file Excel yang diupload -> kolom "urutan" di tabel
+// id_tanaman -> dipakai buat sort dropdown Komoditi di panel Rekon.
+async function muatReferensiIdTanaman() {
+  const { data, error } = await supabase.from("id_tanaman").select("jenis, namatanaman, urutan");
+  const map = { sbs: {}, bst: {}, tbf: {}, th: {} };
+  if (!error && data) {
+    for (const row of data) {
+      if (!map[row.jenis]) map[row.jenis] = {};
+      map[row.jenis][normalisasiNamaTanaman(row.namatanaman)] = row.urutan;
+    }
+  }
+  state.idTanamanUrutan = map;
+}
+
+const btnUploadReferensi = $("btn-upload-referensi");
+if (btnUploadReferensi) btnUploadReferensi.addEventListener("click", uploadReferensiIdTanaman);
+
+async function uploadReferensiIdTanaman() {
+  const fileInput = $("in-file-referensi");
+  const logBox = $("log-referensi");
+  const btn = $("btn-upload-referensi");
+  const file = fileInput.files[0];
+
+  if (!file) {
+    logBox.textContent = "Pilih file Excel referensi dulu.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "⏳ Memproses...";
+  logBox.textContent = "Membaca file...";
+
+  const jenisValid = ["sbs", "bst", "tbf", "th"];
+
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const hasil = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const jenis = sheetName.trim().toLowerCase();
+      if (!jenisValid.includes(jenis)) continue;
+
+      const rowsSheet = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "" });
+      const daftar = [];
+      let urutan = 0;
+      for (const row of rowsSheet) {
+        const nama = String(row.namatanaman ?? row.Namatanaman ?? row.NamaTanaman ?? "").trim();
+        if (!nama) continue;
+        urutan += 1;
+        const idRaw = row.idtanaman ?? row.Idtanaman ?? row.IdTanaman ?? "";
+        daftar.push({
+          jenis,
+          namatanaman: nama,
+          idtanaman: idRaw === "" ? null : String(idRaw),
+          urutan,
+        });
+      }
+      if (daftar.length === 0) continue;
+
+      logBox.textContent = `Mengupload ${daftar.length} komoditi untuk jenis ${jenis.toUpperCase()}...`;
+
+      // Ganti semua referensi lama utk jenis ini (delete lalu insert ulang).
+      const { error: errDel } = await supabase.from("id_tanaman").delete().eq("jenis", jenis);
+      if (errDel) throw new Error(`Gagal hapus referensi lama (${jenis.toUpperCase()}): ${errDel.message}`);
+
+      const { error: errIns } = await supabase.from("id_tanaman").insert(daftar);
+      if (errIns) throw new Error(`Gagal upload referensi (${jenis.toUpperCase()}): ${errIns.message}`);
+
+      hasil.push(`${jenis.toUpperCase()}: ${daftar.length} komoditi`);
+    }
+
+    if (hasil.length === 0) {
+      logBox.textContent =
+        "Tidak ada sheet valid ditemukan.\n" +
+        "Nama sheet di file Excel harus persis: sbs, bst, tbf, atau th.";
+    } else {
+      logBox.textContent = `✓ Referensi berhasil diupdate!\n${hasil.join("\n")}`;
+      await muatReferensiIdTanaman();
+      // Refresh dropdown komoditi yang sedang aktif (kalau ada) supaya
+      // urutan barunya langsung kepakai.
+      if ($("sel-kab").value) await siapkanKomoditiSelect();
+    }
+  } catch (e) {
+    logBox.textContent = `✗ Gagal: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⬆ Upload Referensi";
+  }
 }
 
 async function muatData() {
