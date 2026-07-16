@@ -141,6 +141,7 @@ async function masukKeApp() {
   await muatReferensiIdTanaman();
   await siapkanKabSelect();
   await muatUlangJenis();
+  await muatData(); // render otomatis begitu selesai login, tanpa perlu klik ulang dropdown
 }
 
 function keluarDariApp() {
