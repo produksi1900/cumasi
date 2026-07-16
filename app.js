@@ -126,7 +126,7 @@ async function masukKeApp() {
     $("wrap-kab-download").classList.remove("hidden");
     $("sel-kab-download").innerHTML =
       `<option value="semua">— Semua Kabupaten/Kota —</option>` +
-      DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.id} - ${k.nama}</option>`).join("");
+      DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
   } else {
     $("wrap-kab-download").classList.add("hidden");
   }
@@ -208,6 +208,13 @@ $("btn-logout").addEventListener("click", async () => {
 // fitur_rekon.py di desktop (lihat excelCols di sph-config.js), supaya
 // file ini bisa langsung dipakai di menu "Pilih File Raw" desktop utk
 // membuat Excel rekon dinamis (dengan dropdown & grafik).
+//
+// CATATAN FILTER KABUPATEN: kolom "kab" di database berisi kode internal
+// dari API sipedas asli (mis. "01", "02", dst — beda dengan kode BPS
+// 4 digit). Kode ini TIDAK dipakai untuk filter di web karena rawan
+// berubah/tidak konsisten antar kabupaten. Sebagai gantinya, filter di
+// web ini pakai kolom "nama_kab" (nama kabupaten apa adanya dari hasil
+// sinkronisasi desktop), yang jauh lebih stabil dan mudah dicocokkan.
 $("btn-download").addEventListener("click", downloadData);
 
 async function downloadData() {
@@ -219,15 +226,15 @@ async function downloadData() {
   const logBox = $("log-download");
   const btn = $("btn-download");
 
-  // Tentukan kabupaten yang mau diambil.
-  // kabId === null artinya "semua kabupaten" (cuma boleh utk role prov;
-  // untuk kabkot selalu dikunci ke kab_id miliknya sendiri).
-  let kabId = null;
+  // Tentukan kabupaten yang mau diambil (berdasarkan nama_kab).
+  // kabNama === null artinya "semua kabupaten" (cuma boleh utk role prov;
+  // untuk kabkot selalu dikunci ke kabupatennya sendiri).
+  let kabNama = null;
   if (state.profile.role === "kabkot") {
-    kabId = state.profile.kab_id;
+    kabNama = state.profile.kab_id;
   } else {
     const pilihan = $("sel-kab-download").value;
-    kabId = pilihan === "semua" ? null : pilihan;
+    kabNama = pilihan === "semua" ? null : pilihan;
   }
 
   btn.disabled = true;
@@ -236,7 +243,7 @@ async function downloadData() {
 
   try {
     let query = supabase.from(cfg.table).select("*").eq("tahun", tahun);
-    if (kabId) query = query.eq("kab", kabId);
+    if (kabNama) query = query.eq("nama_kab", kabNama);
     const { data: rows, error } = await query.order("urutkec", { ascending: true });
 
     if (error) throw error;
@@ -244,7 +251,7 @@ async function downloadData() {
     if (!rows || rows.length === 0) {
       logBox.textContent =
         `Tidak ada data ${jenis.toUpperCase()} tahun ${tahun}` +
-        `${kabId ? "" : " untuk seluruh kabupaten"}.\n` +
+        `${kabNama ? "" : " untuk seluruh kabupaten"}.\n` +
         `(Kemungkinan belum ada sinkronisasi dari aplikasi desktop.)`;
       return;
     }
@@ -273,9 +280,7 @@ async function downloadData() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, cfg.label.slice(0, 31));
 
-    const labelKab = kabId
-      ? (DAFTAR_KAB_BABEL.find((k) => k.id === kabId)?.nama ?? kabId)
-      : "SemuaKab";
+    const labelKab = kabNama ?? "SemuaKab";
     const namaFile = `${cfg.label}_${labelKab.replace(/\s+/g, "")}_${tahun}.xlsx`;
     XLSX.writeFile(wb, namaFile);
 
@@ -356,7 +361,8 @@ async function siapkanKabSelect() {
   if (!state.profile) return;
   const selKab = $("sel-kab");
 
-  // kabkot: dikunci ke kab_id miliknya sendiri
+  // kabkot: dikunci ke kabupatennya sendiri (profile.kab_id berisi
+  // nama_kab, sama seperti yang dipakai untuk filter "nama_kab" di DB).
   if (state.profile.role === "kabkot") {
     const kab = DAFTAR_KAB_BABEL.find((k) => k.id === state.profile.kab_id);
     selKab.innerHTML = `<option value="${state.profile.kab_id}">${kab ? kab.nama : state.profile.kab_id}</option>`;
@@ -366,7 +372,7 @@ async function siapkanKabSelect() {
 
   selKab.disabled = false;
   selKab.innerHTML = DAFTAR_KAB_BABEL
-    .map((k) => `<option value="${k.id}">${k.id} - ${k.nama}</option>`)
+    .map((k) => `<option value="${k.id}">${k.nama}</option>`)
     .join("");
   await siapkanKomoditiSelect();
 }
@@ -375,7 +381,7 @@ async function siapkanKomoditiSelect() {
   const jenis = $("sel-jenis").value;
   const cfg = SPH_CONFIG[jenis];
   const tahun = Number($("sel-tahun-rekon").value);
-  const kabId = $("sel-kab").value;
+  const kabNama = $("sel-kab").value;
   const selKom = $("sel-komoditi");
 
   selKom.innerHTML = `<option value="">Memuat...</option>`;
@@ -384,7 +390,7 @@ async function siapkanKomoditiSelect() {
     .from(cfg.table)
     .select("namatanaman")
     .eq("tahun", tahun)
-    .eq("kab", kabId)
+    .eq("nama_kab", kabNama)
     .limit(5000);
 
   if (error || !data) {
@@ -402,11 +408,11 @@ async function muatData() {
   const jenis = $("sel-jenis").value;
   const cfg = SPH_CONFIG[jenis];
   const tahun = Number($("sel-tahun-rekon").value);
-  const kabId = $("sel-kab").value;
+  const kabNama = $("sel-kab").value;
   const komoditi = $("sel-komoditi").value;
   const area = $("rekon-area");
 
-  if (!kabId || !komoditi) {
+  if (!kabNama || !komoditi) {
     area.innerHTML = `<div class="placeholder-kosong">Pilih kabupaten & komoditi untuk mulai.</div>`;
     return;
   }
@@ -417,7 +423,7 @@ async function muatData() {
     .from(cfg.table)
     .select("*")
     .eq("tahun", tahun)
-    .eq("kab", kabId)
+    .eq("nama_kab", kabNama)
     .eq("namatanaman", komoditi)
     .order("urutkec", { ascending: true });
 
