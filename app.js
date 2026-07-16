@@ -244,7 +244,11 @@ async function downloadData() {
   try {
     let query = supabase.from(cfg.table).select("*").eq("tahun", tahun);
     if (kabNama) query = query.eq("nama_kab", kabNama);
-    const { data: rows, error } = await query.order("urutkec", { ascending: true });
+    const { data: rows, error } = await query
+      .order(cfg.periodeCol, { ascending: true })
+      .order("kab", { ascending: true })
+      .order("urutkec", { ascending: true })
+      .order("idtanaman", { ascending: true, nullsFirst: false });
 
     if (error) throw error;
 
