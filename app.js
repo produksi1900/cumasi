@@ -18,6 +18,41 @@ const TAHUN_AWAL = 2018;
 const TAHUN_SEKARANG = new Date().getFullYear();
 
 // ============================================================
+// PENTING — fetchAllRows()
+// ============================================================
+// Supabase/PostgREST punya batas default jumlah baris per request
+// (biasanya 1000), TERLEPAS dari berapapun angka yang ditulis di
+// .limit() di sisi client. Kalau baris utk 1 kombinasi tahun+kab (atau
+// tahun+komoditi utk "semua kab") lebih banyak dari batas itu (gampang
+// kejadian kalau banyak kecamatan x komoditi x periode), maka baris yang
+// "kepotong" itu HILANG BEGITU SAJA dari hasil query -- urutan hasil
+// juga tidak dijamin, jadi komoditi mana yang kepotong bisa beda-beda
+// setiap kali sync ulang dari aplikasi desktop. Ini akar penyebab
+// "komoditi ada di database tapi ga muncul di dropdown / tabel Rata-Rata
+// / hasil download Excel".
+//
+// Fix: selalu ambil data lewat helper ini, yang melakukan pagination
+// pakai .range() sampai benar-benar habis (bukan cuma 1x request).
+//
+// queryFn menerima (from, to) dan harus mengembalikan query supabase
+// yang SUDAH di .select(...)/.eq(...)/.order(...) dst, tinggal di-range.
+const SUPABASE_PAGE_SIZE = 1000;
+async function fetchAllRows(queryFn) {
+  let semua = [];
+  let from = 0;
+  while (true) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await queryFn(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    semua = semua.concat(data);
+    if (data.length < SUPABASE_PAGE_SIZE) break; // halaman terakhir
+    from += SUPABASE_PAGE_SIZE;
+  }
+  return semua;
+}
+
+// ============================================================
 // Util kecil
 // ============================================================
 const $ = (id) => document.getElementById(id);
@@ -256,15 +291,16 @@ async function downloadData() {
   logBox.textContent = `Mengambil data ${jenis.toUpperCase()} tahun ${tahun} dari database...`;
 
   try {
-    let query = supabase.from(cfg.table).select("*").eq("tahun", tahun);
-    if (kabNama) query = query.eq("nama_kab", kabNama);
-    const { data: rows, error } = await query
-      .order(cfg.periodeCol, { ascending: true })
-      .order("kab", { ascending: true })
-      .order("urutkec", { ascending: true })
-      .order("idtanaman", { ascending: true, nullsFirst: false });
-
-    if (error) throw error;
+    const rows = await fetchAllRows((from, to) => {
+      let query = supabase.from(cfg.table).select("*").eq("tahun", tahun);
+      if (kabNama) query = query.eq("nama_kab", kabNama);
+      return query
+        .order(cfg.periodeCol, { ascending: true })
+        .order("kab", { ascending: true })
+        .order("urutkec", { ascending: true })
+        .order("idtanaman", { ascending: true, nullsFirst: false })
+        .range(from, to);
+    });
 
     if (!rows || rows.length === 0) {
       logBox.textContent =
@@ -424,14 +460,17 @@ async function siapkanKomoditiSelect() {
 
   selKom.innerHTML = `<option value="">Memuat...</option>`;
 
-  const { data, error } = await supabase
-    .from(cfg.table)
-    .select("namatanaman")
-    .eq("tahun", tahun)
-    .eq("nama_kab", kabNama)
-    .limit(5000);
-
-  if (error || !data) {
+  let data;
+  try {
+    data = await fetchAllRows((from, to) =>
+      supabase
+        .from(cfg.table)
+        .select("namatanaman")
+        .eq("tahun", tahun)
+        .eq("nama_kab", kabNama)
+        .range(from, to)
+    );
+  } catch (e) {
     selKom.innerHTML = `<option value="">(gagal memuat)</option>`;
     return;
   }
@@ -465,9 +504,16 @@ function normalisasiNamaTanaman(n) {
 // Urutan baris di file Excel yang diupload -> kolom "urutan" di tabel
 // id_tanaman -> dipakai buat sort dropdown Komoditi di panel Rekon.
 async function muatReferensiIdTanaman() {
-  const { data, error } = await supabase.from("id_tanaman").select("jenis, namatanaman, urutan");
+  let data = [];
+  try {
+    data = await fetchAllRows((from, to) =>
+      supabase.from("id_tanaman").select("jenis, namatanaman, urutan").range(from, to)
+    );
+  } catch (e) {
+    data = [];
+  }
   const map = { sbs: {}, bst: {}, tbf: {}, th: {} };
-  if (!error && data) {
+  if (data) {
     for (const row of data) {
       if (!map[row.jenis]) map[row.jenis] = {};
       map[row.jenis][normalisasiNamaTanaman(row.namatanaman)] = row.urutan;
@@ -570,15 +616,19 @@ async function muatData() {
   area.innerHTML = `<div class="placeholder-kosong">⏳ Memuat data...</div>`;
 
   // Data kabupaten terpilih (utk tabel utama & grafik per kecamatan)
-  const { data: rowsKab, error } = await supabase
-    .from(cfg.table)
-    .select("*")
-    .eq("tahun", tahun)
-    .eq("nama_kab", kabNama)
-    .eq("namatanaman", komoditi)
-    .order("urutkec", { ascending: true });
-
-  if (error) {
+  let rowsKab;
+  try {
+    rowsKab = await fetchAllRows((from, to) =>
+      supabase
+        .from(cfg.table)
+        .select("*")
+        .eq("tahun", tahun)
+        .eq("nama_kab", kabNama)
+        .eq("namatanaman", komoditi)
+        .order("urutkec", { ascending: true })
+        .range(from, to)
+    );
+  } catch (error) {
     area.innerHTML = `<div class="placeholder-kosong">Gagal memuat data: ${error.message}</div>`;
     return;
   }
@@ -590,13 +640,24 @@ async function muatData() {
   // Data SEMUA kabupaten (komoditi & tahun sama) utk tabel & grafik
   // "Rata-Rata ... menurut Kabupaten & Bulan/Triwulan" (persis spt desktop).
   // RLS Supabase otomatis membatasi ini kalau role-nya kabkot.
-  const { data: rowsSemua, error: errSemua } = await supabase
-    .from(cfg.table)
-    .select("*")
-    .eq("tahun", tahun)
-    .eq("namatanaman", komoditi);
+  // PENTING: query ini paling rawan kepotong batas baris karena tidak
+  // difilter per kabupaten (gabungan 7 kab x semua kecamatan x semua
+  // periode), jadi WAJIB lewat fetchAllRows juga.
+  let rowsSemua = [];
+  try {
+    rowsSemua = await fetchAllRows((from, to) =>
+      supabase
+        .from(cfg.table)
+        .select("*")
+        .eq("tahun", tahun)
+        .eq("namatanaman", komoditi)
+        .range(from, to)
+    );
+  } catch (e) {
+    rowsSemua = [];
+  }
 
-  renderRekon(cfg, rowsKab, errSemua ? [] : (rowsSemua || []), komoditi);
+  renderRekon(cfg, rowsKab, rowsSemua, komoditi);
 }
 
 // ---- Helper umum ----
