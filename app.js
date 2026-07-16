@@ -260,13 +260,13 @@ async function downloadData() {
     // excelCols (mengandung kata kunci yang dicari fitur_rekon.py).
     const rowsExcel = rows.map((r) => {
       const out = {
+        idtanaman: r.idtanaman,
+        namatanaman: r.namatanaman,
         kab: r.kab,
         nama_kab: r.nama_kab,
         urutkec: r.urutkec,
         kec: r.kec,
         nama_kec: r.nama_kec,
-        idtanaman: r.idtanaman,
-        namatanaman: r.namatanaman,
         tahun: r.tahun,
         [cfg.periodeCol]: r[cfg.periodeCol],
       };
@@ -278,7 +278,7 @@ async function downloadData() {
 
     const ws = XLSX.utils.json_to_sheet(rowsExcel);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, cfg.label.slice(0, 31));
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
 
     const labelKab = kabNama ?? "SemuaKab";
     const namaFile = `${cfg.label}_${labelKab.replace(/\s+/g, "")}_${tahun}.xlsx`;
