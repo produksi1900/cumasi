@@ -137,11 +137,16 @@ export const SPH_CONFIG = {
 // dengan isi kolom "nama_kab" di database Supabase, karena app.js
 // memfilter data pakai .eq("nama_kab", id) -- bukan pakai kode kabupaten.
 // Yang sudah dikonfirmasi lewat SQL: kab "01" -> nama_kab "Bangka".
-// 6 baris lainnya MASIH TEBAKAN pola yang sama (tanpa "Kab."/"Kota").
-// Begitu data kabupaten lain mulai tersinkron dari aplikasi desktop,
-// jalankan ulang query berikut di Supabase SQL Editor untuk memastikan:
+// Kota Pangkal Pinang dikonfirmasi di database ditulis "Kota Pangkal
+// Pinang" (DENGAN spasi antara "Pangkal" dan "Pinang") -- lihat tabel
+// data_sbs kolom nama_kab. Kalau data kabupaten lain mulai tersinkron
+// dari aplikasi desktop, jalankan ulang query berikut di Supabase SQL
+// Editor untuk memastikan:
 //   select distinct kab, nama_kab from data_sbs order by kab;
 // lalu cocokkan/perbaiki nilai "id" di bawah ini kalau ternyata beda.
+// JANGAN LUPA: kolom profiles.kab_id untuk user role "kabkot" juga WAJIB
+// sama persis dengan nilai "id" di bawah ini (lihat catatan di app.js
+// bagian siapkanKabSelect()).
 export const DAFTAR_KAB_BABEL = [
   { id: "Bangka", nama: "Kab. Bangka" },
   { id: "Belitung", nama: "Kab. Belitung" },
@@ -149,5 +154,5 @@ export const DAFTAR_KAB_BABEL = [
   { id: "Bangka Tengah", nama: "Kab. Bangka Tengah" },
   { id: "Bangka Selatan", nama: "Kab. Bangka Selatan" },
   { id: "Belitung Timur", nama: "Kab. Belitung Timur" },
-  { id: "Kota Pangkalpinang", nama: "Kota Pangkal Pinang" },
+  { id: "Kota Pangkal Pinang", nama: "Kota Pangkal Pinang" },
 ];
