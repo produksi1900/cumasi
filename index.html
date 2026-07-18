@@ -7,7 +7,14 @@
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="logo.ico">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Dipakai xlsx-js-style (bukan xlsx biasa) karena versi gratis SheetJS
+       resmi TIDAK bisa menulis styling (warna fill/font) ke file .xlsx --
+       fitur itu cuma ada di versi Pro berbayar. xlsx-js-style adalah fork
+       gratis dari komunitas dengan API yang sama persis (XLSX.utils...,
+       XLSX.writeFile...) tapi beneran menulis cell.s (fill/font/border)
+       ke file Excel, jadi warna kuning/hijau/abu-abu di app.js bisa
+       benar-benar muncul saat dibuka di Excel. -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 <body>
 
