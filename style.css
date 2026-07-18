@@ -149,7 +149,22 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 }
 .panel-kanan {
   flex: 1; padding: 14px;
-  overflow-y: auto; min-height: 0;
+  min-height: 0;
+  /* Panel kanan sendiri TIDAK discroll -- yang discroll adalah area
+     tabel di dalamnya (#rekon-area / #rangkuman-area), supaya slicer
+     (dropdown Jenis SPH/Tahun/Kab/Komoditi) & tab bar tetap "freeze"
+     kelihatan pas scroll ke bawah lihat tabel yang panjang. */
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+/* isi-terkunci di panel-rekon perlu ikut jadi flex column & mengisi
+   sisa tinggi, supaya view-rekon/view-rangkuman di dalamnya bisa
+   menghitung area scroll dgn benar. Panel lain (panel-download,
+   panel-referensi) TIDAK terpengaruh krn selector di-scope ke
+   #panel-rekon saja. */
+#panel-rekon.blok-terkunci .isi-terkunci {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0;
 }
 
 .section-label {
@@ -184,10 +199,23 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 .toggle-btn.aktif { background: var(--hijau-tua); border-color: var(--hijau-tua); color: var(--putih); }
 
 /* ---------- Rekon ---------- */
-.rekon-slicer { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 10px; }
+/* view-rekon & view-rangkuman jadi flex column yang mengisi sisa tinggi
+   panel kanan: slicer & tab-bar (flex-shrink default) tetap "freeze" di
+   atas, sedangkan #rekon-area/#rangkuman-area (flex:1) yang discroll. */
+#view-rekon:not(.hidden), #view-rangkuman:not(.hidden) {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0;
+}
+#rekon-area, #rangkuman-area {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px; /* kasih sedikit jarak dari scrollbar */
+}
+
+.rekon-slicer { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 10px; flex-shrink: 0; }
 .rekon-slicer .field { margin-bottom: 0; min-width: 150px; }
 
-.tab-bar { display: flex; gap: 4px; margin-bottom: 10px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 10px; flex-shrink: 0; }
 .tab-btn {
   border: none; background: var(--abu2); color: var(--teks-gelap);
   padding: 7px 14px; border-radius: 5px 5px 0 0; font-size: 12px; font-weight: bold;
@@ -318,7 +346,12 @@ table.tabel-rekon td.outlier-rata { background-color: #fff176 !important; font-w
   body { display: block; }
   .app-shell { flex-direction: column; }
   .panel-kiri { width: 100%; border-right: none; border-bottom: 1px solid #ddd; overflow-y: visible; }
-  .panel-kanan { overflow-y: visible; padding: 10px; }
+  /* Di mobile balik ke scroll biasa 1 halaman -- freeze slicer/tab-bar
+     cuma dipakai di layout desktop yang punya tinggi viewport tetap. */
+  .panel-kanan { overflow: visible; padding: 10px; display: block; }
+  #panel-rekon.blok-terkunci .isi-terkunci { display: block; flex: none; }
+  #view-rekon:not(.hidden), #view-rangkuman:not(.hidden) { display: block; flex: none; }
+  #rekon-area, #rangkuman-area { overflow-y: visible; flex: none; padding-right: 0; }
 
   .header {
     height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 4px;
