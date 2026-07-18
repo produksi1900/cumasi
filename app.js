@@ -203,9 +203,20 @@ async function masukKeApp() {
 
   // ---- Panel Rangkuman: siapkan pilihan tahun & kabupaten ----
   isiPilihanTahun($("sel-tahun-rangkuman"));
-  $("sel-kab-rangkuman").innerHTML =
-    `<option value="semua">— Semua Kabupaten/Kota (Provinsi) —</option>` +
-    DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
+  if (profile.role === "kabkot") {
+    // Sama seperti panel Rekonsiliasi: kabkot dikunci ke kabupatennya
+    // sendiri, tidak boleh pilih "Semua Kabupaten/Kota" atau kab lain.
+    const namakabDB = profile.kab_id;
+    const kabEntryRangkuman = DAFTAR_KAB_BABEL.find((k) => k.id === namakabDB);
+    const labelKabRangkuman = kabEntryRangkuman ? kabEntryRangkuman.nama : namakabDB;
+    $("sel-kab-rangkuman").innerHTML = `<option value="${namakabDB}">${labelKabRangkuman}</option>`;
+    $("sel-kab-rangkuman").disabled = true;
+  } else {
+    $("sel-kab-rangkuman").disabled = false;
+    $("sel-kab-rangkuman").innerHTML =
+      `<option value="semua">— Semua Kabupaten/Kota (Provinsi) —</option>` +
+      DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
+  }
 
   await muatReferensiIdTanaman();
   await siapkanKabSelect();
