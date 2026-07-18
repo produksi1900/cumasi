@@ -234,7 +234,17 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 }
 .scroll-atas-dummy { height: 1px; }
 
-.tabel-scroll { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+/* Setiap tabel (.tabel-blok) sekarang punya tinggi maksimum + scroll
+   vertikal SENDIRI (bukan cuma horizontal). Ini supaya judul kuning &
+   header kolom yang position:sticky bisa nempel dgn benar -- karena
+   overflow-x:auto di elemen yang sama membuatnya jadi "kontainer scroll"
+   itu sendiri (browser tidak akan sticky relatif ke area scroll di luar
+   kalau ada ancestor overflow non-visible di antaranya). Kalau isi tabel
+   muat semua (< max-height), scrollbar tidak muncul sama sekali. */
+.tabel-scroll {
+  overflow-x: auto; overflow-y: auto; max-height: 60vh;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* .tabel-konten membungkus judul+tabel supaya lebarnya SAMA dgn lebar asli
    tabel (termasuk bagian yg baru kelihatan setelah discroll ke kanan).
@@ -247,6 +257,12 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
   background: #FFF176; padding: 6px 10px; font-size: 13px; font-weight: bold;
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
 }
+/* Freeze vertikal: judul kuning nempel di atas tiap tabel selama
+   discroll di dalam tabel itu sendiri (.tabel-scroll, yg sekarang punya
+   tinggi maksimum + scroll sendiri -- lihat komentar di .tabel-scroll). */
+.tabel-judul {
+  position: sticky; top: 0; z-index: 5;
+}
 /* Judul & satuan nempel (sticky) di kiri/kanan AREA YANG KELIHATAN saat
    discroll horizontal, jadi tetap terbaca ke mana pun posisi scroll. */
 .tabel-judul > span:first-child {
@@ -255,6 +271,14 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 .tabel-judul .satuan {
   font-style: italic; font-weight: normal; font-size: 11px;
   position: sticky; right: 10px; white-space: nowrap;
+}
+
+/* Freeze vertikal: baris header kolom (Kode/Nama/Jan/Feb/dst) nempel
+   persis di bawah judul kuning saat discroll ke bawah. Nilai "top"
+   disamakan dgn tinggi kira-kira .tabel-judul (padding 6px*2 + font 13px). */
+#rekon-area table.tabel-rekon thead th,
+#rangkuman-area table.tabel-rekon thead th {
+  position: sticky; top: 33px; z-index: 4;
 }
 
 table.tabel-rekon {
