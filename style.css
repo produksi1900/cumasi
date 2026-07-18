@@ -361,9 +361,11 @@ table.tabel-rekon td.outlier-rata { background-color: #fff176 !important; font-w
   overflow: hidden; text-overflow: ellipsis;
   box-shadow: 3px 0 6px -3px rgba(0,0,0,0.35); /* penanda batas area freeze */
 }
-/* Header (baris judul kolom) tetap kelihatan di atas cell body yang lewat
-   di baliknya saat scroll -- z-index lebih tinggi drpd sel body biasa. */
-#rangkuman-area table.tabel-rekon th:nth-child(-n+3) { z-index: 3; }
+/* Header (baris judul kolom) kolom freeze (Kode/Nama/Satuan) WAJIB
+   z-index lebih tinggi drpd header kolom biasa (Jan/Feb/dst, z-index:4
+   dari aturan sticky-top umum) -- supaya pas discroll ke kanan, header
+   kolom biasa yang lewat TIDAK menimpa/menutupi header kolom freeze. */
+#rangkuman-area table.tabel-rekon th:nth-child(-n+3) { z-index: 6; }
 
 @media (max-width: 860px) {
   html, body { overflow: auto; }
