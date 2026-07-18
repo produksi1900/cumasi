@@ -115,6 +115,14 @@ function normalisasiNamaTanaman(n) {
   return String(n ?? "").trim().toLowerCase();
 }
 
+// Baris "Group" (mis. "Cabai Besar (Group)", "Jamur (Group)") adalah
+// gabungan/rekap dari komoditi lain yang SUDAH ikut dihitung sendiri2 di
+// baris lain -- jadi harus TETAP ditampilkan di tabel Rangkuman, tapi
+// TIDAK boleh ikut dijumlah ke baris TOTAL (supaya tidak dobel hitung).
+function isNamaGroup(nama) {
+  return /\(group\)/i.test(String(nama ?? ""));
+}
+
 // ============================================================
 // AUTH — login didok di panel kiri (bukan fullscreen)
 // ============================================================
@@ -1224,6 +1232,7 @@ function renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
   namaList.forEach((nama) => {
     const d = mapIni.get(nama);
     const dLalu = mapLalu.get(nama) || { tw: { 1: 0, 2: 0, 3: 0, 4: 0 }, bulan: {} };
+    const isGroup = isNamaGroup(nama); // baris "(Group)": tampil, tapi TIDAK ikut TOTAL
 
     const jumlah = (d.tw[1] || 0) + (d.tw[2] || 0) + (d.tw[3] || 0) + (d.tw[4] || 0);
     const jumlahLalu = (dLalu.tw[1] || 0) + (dLalu.tw[2] || 0) + (dLalu.tw[3] || 0) + (dLalu.tw[4] || 0);
@@ -1251,17 +1260,19 @@ function renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
       for (let b = 1; b <= 12; b++) {
         const v = d.bulan[b] || 0;
         tds += `<td>${fmt(v, 2)}</td>`;
-        totalBulan[b] += v;
+        if (!isGroup) totalBulan[b] += v;
       }
     }
     for (let t = 1; t <= 4; t++) {
       const v = d.tw[t] || 0;
       tds += `<td>${fmt(v, 2)}</td>`;
-      totalTw[t] += v;
+      if (!isGroup) totalTw[t] += v;
     }
-    for (let t = 1; t <= 4; t++) totalTwLalu[t] += (dLalu.tw[t] || 0);
-    totalKumulIni  += kumulIni;
-    totalKumulLalu += kumulLalu;
+    if (!isGroup) {
+      for (let t = 1; t <= 4; t++) totalTwLalu[t] += (dLalu.tw[t] || 0);
+      totalKumulIni  += kumulIni;
+      totalKumulLalu += kumulLalu;
+    }
 
     tds += `<td>${fmt(jumlah, 2)}</td>`;
     tds += `<td>${fmtGrowthHtml(qtoq)}</td>`;
@@ -1431,6 +1442,7 @@ function tulisSheetRangkuman(wb, sheetName, cfg, rc, rowsIni, rowsLalu, jenis, t
     const d     = mapIni.get(nama);
     const dLalu = mapLalu.get(nama) || { tw: { 1: 0, 2: 0, 3: 0, 4: 0 }, bulan: {} };
     const { qtoq, yoy, ctoc } = hitungGrowthXl(d, dLalu);
+    const isGroup = isNamaGroup(nama); // baris "(Group)": tampil, tapi TIDAK ikut TOTAL
 
     // Baris ke-2, ke-4, dst (0-indexed: ganjil) dikasih background abu-abu
     // tipis, sama seperti tr:nth-child(even) di tampilan web.
@@ -1442,8 +1454,10 @@ function tulisSheetRangkuman(wb, sheetName, cfg, rc, rowsIni, rowsLalu, jenis, t
     if (twNow !== null) {
       for (let t = 1; t <= twNow; t++) { kumulIni += d.tw[t] || 0; kumulLalu += dLalu.tw[t] || 0; }
     }
-    totalKumulIni  += kumulIni;
-    totalKumulLalu += kumulLalu;
+    if (!isGroup) {
+      totalKumulIni  += kumulIni;
+      totalKumulLalu += kumulLalu;
+    }
 
     let col = 0;
     setCell(dataRow, col++, xlCell(d.idtanaman || "-", { align: "left", bgColor: stripeBg }));
@@ -1453,14 +1467,16 @@ function tulisSheetRangkuman(wb, sheetName, cfg, rc, rowsIni, rowsLalu, jenis, t
     if (pakaiBulan) {
       for (let b = 1; b <= 12; b++) {
         const v = d.bulan[b] || 0;
-        totalBulan[b] += v;
+        if (!isGroup) totalBulan[b] += v;
         setCell(dataRow, col++, xlCell(v === 0 ? null : v, { numFmt: "#,##0.00", bgColor: stripeBg }));
       }
     }
     for (let t = 1; t <= 4; t++) {
       const v = d.tw[t] || 0;
-      totalTw[t]   += v;
-      totalTwLalu[t] += (dLalu.tw[t] || 0);
+      if (!isGroup) {
+        totalTw[t]   += v;
+        totalTwLalu[t] += (dLalu.tw[t] || 0);
+      }
       setCell(dataRow, col++, xlCell(v === 0 ? null : v, { numFmt: "#,##0.00", bgColor: stripeBg }));
     }
 
