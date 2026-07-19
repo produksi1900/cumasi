@@ -595,3 +595,27 @@ td.col-hapus { text-align: center; width: 34px; }
 .combo-empty {
   padding: 6px 8px; font-size: 12px; color: #999; font-style: italic;
 }
+
+/* ---------- Toolbar Anomali: dorong tombol dashboard ke kanan ---------- */
+.anomali-toolbar-spacer { flex: 1; }
+
+/* ---------- Dashboard Anomali ---------- */
+.modal-box-lebar {
+  max-width: 860px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+table.tabel-dashboard-anomali {
+  border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px;
+}
+table.tabel-dashboard-anomali th, table.tabel-dashboard-anomali td {
+  border: 1px solid #ddd; padding: 6px 8px; text-align: center;
+  background-color: var(--putih); white-space: nowrap;
+}
+table.tabel-dashboard-anomali th {
+  background-color: var(--hijau-muda); color: var(--putih); position: sticky; top: 0;
+}
+table.tabel-dashboard-anomali td.nama { text-align: left; font-weight: bold; }
+table.tabel-dashboard-anomali tr.baris-total-dashboard td {
+  background-color: var(--abu2); font-weight: bold;
+}

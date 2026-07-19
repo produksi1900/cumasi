@@ -2451,6 +2451,132 @@ async function downloadAnomaliExcel() {
 }
 
 // ============================================================
+// DASHBOARD ANOMALI — ringkasan semua Jenis SPH x Kabupaten
+// ============================================================
+const JENIS_LIST_DASHBOARD = ["sbs", "bst", "tbf", "th"];
+
+$("btn-buka-dashboard-anomali")?.addEventListener("click", bukaDashboardAnomali);
+$("btn-buka-dashboard-anomali-kabkot")?.addEventListener("click", bukaDashboardAnomali);
+$("btn-tutup-dashboard-anomali")?.addEventListener("click", () => {
+  $("modal-dashboard-anomali").classList.add("hidden");
+});
+$("modal-dashboard-anomali")?.addEventListener("click", (e) => {
+  if (e.target.id === "modal-dashboard-anomali") $("modal-dashboard-anomali").classList.add("hidden");
+});
+
+async function bukaDashboardAnomali() {
+  $("modal-dashboard-anomali").classList.remove("hidden");
+  $("dashboard-anomali-isi").innerHTML = `<div class="placeholder-kosong">⏳ Memuat data...</div>`;
+
+  // Provinsi: lihat semua kab. Kabkot: cuma kabupatennya sendiri.
+  const kabList = isProv() ? KAB_ANOMALI_LIST : [state.profile.kab_id];
+
+  let rows;
+  try {
+    rows = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("konfirmasi_anomali")
+        .select("jenis, kab_id, konfirmasi_kabkot, approval_provinsi");
+      if (!isProv()) q = q.eq("kab_id", state.profile.kab_id);
+      return q.range(from, to);
+    });
+  } catch (e) {
+    $("dashboard-anomali-isi").innerHTML = `<div class="placeholder-kosong">Gagal memuat data: ${e.message}</div>`;
+    return;
+  }
+
+  renderDashboardAnomali(rows, kabList);
+}
+
+function renderDashboardAnomali(rows, kabList) {
+  const area = $("dashboard-anomali-isi");
+
+  const map = new Map(); // key `${kab}|${jenis}` -> stats
+  for (const kab of kabList) {
+    for (const jenis of JENIS_LIST_DASHBOARD) {
+      map.set(`${kab}|${jenis}`, {
+        total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0,
+        approvalYa: 0, approvalTidak: 0, approvalBelum: 0,
+      });
+    }
+  }
+
+  for (const r of rows) {
+    const key = `${r.kab_id}|${r.jenis}`;
+    if (!map.has(key)) continue;
+    const s = map.get(key);
+    s.total++;
+    const sudah = r.konfirmasi_kabkot && String(r.konfirmasi_kabkot).trim() !== "";
+    if (sudah) s.sudahKonfirmasi++; else s.belumKonfirmasi++;
+    if (r.approval_provinsi === "ya") s.approvalYa++;
+    else if (r.approval_provinsi === "tidak") s.approvalTidak++;
+    else s.approvalBelum++;
+  }
+
+  const totalRow = { total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 };
+  let bodyRows = "";
+
+  for (const kab of kabList) {
+    const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kab);
+    const labelKab = kabEntry ? kabEntry.nama : kab;
+    let barisPertama = true;
+
+    for (const jenis of JENIS_LIST_DASHBOARD) {
+      const s = map.get(`${kab}|${jenis}`);
+      if (s.total === 0) continue; // skip kombinasi yang belum ada anomali sama sekali
+
+      totalRow.total += s.total;
+      totalRow.sudahKonfirmasi += s.sudahKonfirmasi;
+      totalRow.belumKonfirmasi += s.belumKonfirmasi;
+      totalRow.approvalYa += s.approvalYa;
+      totalRow.approvalTidak += s.approvalTidak;
+      totalRow.approvalBelum += s.approvalBelum;
+
+      bodyRows += `<tr>
+        <td class="nama">${barisPertama ? labelKab : ""}</td>
+        <td>${SPH_CONFIG[jenis].label}</td>
+        <td>${s.total}</td>
+        <td>${s.sudahKonfirmasi}</td>
+        <td>${s.belumKonfirmasi}</td>
+        <td>${s.approvalYa}</td>
+        <td>${s.approvalTidak}</td>
+        <td>${s.approvalBelum}</td>
+      </tr>`;
+      barisPertama = false;
+    }
+  }
+
+  if (bodyRows === "") {
+    area.innerHTML = `<div class="placeholder-kosong">Belum ada data anomali sama sekali.</div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <table class="tabel-dashboard-anomali">
+      <thead>
+        <tr>
+          <th>Kabupaten</th><th>SPH</th><th>Total Anomali</th>
+          <th>Sudah Konfirmasi</th><th>Belum Konfirmasi</th>
+          <th>Approval: Ya</th><th>Approval: Tidak</th><th>Approval: Belum</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${bodyRows}
+        <tr class="baris-total-dashboard">
+          <td colspan="2">TOTAL</td>
+          <td>${totalRow.total}</td>
+          <td>${totalRow.sudahKonfirmasi}</td>
+          <td>${totalRow.belumKonfirmasi}</td>
+          <td>${totalRow.approvalYa}</td>
+          <td>${totalRow.approvalTidak}</td>
+          <td>${totalRow.approvalBelum}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+}
+
+// ============================================================
 // Mulai
 // ============================================================
 cekSesiAwal();
