@@ -101,28 +101,57 @@ body { display: flex; flex-direction: column; }
 }
 .login-box input:focus { outline: none; border-color: var(--hijau-muda); }
 .chk { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 4px 0 12px; color: #666; }
-button.btn-login {
+.btn-login {
+  display: block;
   width: 100%; padding: 9px; border: none; border-radius: 6px;
   background: var(--hijau-muda); color: var(--putih); font-weight: bold; font-size: 14px;
-  cursor: pointer;
+  cursor: pointer; text-align: center; box-sizing: border-box;
 }
-button.btn-login:hover { background: var(--hijau-tua); }
-button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor: not-allowed; }
+.btn-login:hover { background: var(--hijau-tua); }
+.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor: not-allowed; }
 .pesan-error { color: var(--merah); font-size: 13px; margin-top: 6px; min-height: 14px; }
 
-/* ---------- Toolbar atas panel Rekonsiliasi (download raw + referensi) ---------- */
-.toolbar-atas {
-  display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
-  background: var(--abu2); border-radius: 6px; padding: 10px 12px;
-  margin-bottom: 4px;
+/* ---------- Tombol kecil di baris toggle (Download Raw Data / Upload Referensi) ---------- */
+.toggle-aksi { display: flex; gap: 8px; flex-wrap: wrap; }
+.toggle-aksi .btn-login,
+.toggle-aksi .btn-kecil {
+  width: auto; white-space: nowrap; padding: 8px 12px; font-size: 13px; display: inline-flex; align-items: center;
 }
-.toolbar-atas .field { margin-bottom: 0; }
-.toolbar-atas select { padding: 7px 8px; font-size: 13px; }
-.toolbar-atas button.btn-kecil { width: auto; white-space: nowrap; padding: 8px 12px; font-size: 13px; }
 .toolbar-status {
-  font-size: 12px; color: #666; min-height: 0; margin: 4px 0 8px;
+  font-size: 12px; color: #666; min-height: 0; margin: 4px 0 8px; text-align: right;
 }
 .toolbar-status:empty { display: none; }
+
+/* ---------- Popup Download Raw Data ---------- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal-box {
+  width: 100%; max-width: 360px;
+  background: var(--putih); border-radius: 10px;
+  padding: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+.modal-title {
+  font-weight: bold; font-size: 16px; color: var(--hijau-tua);
+  margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-close {
+  border: none; background: transparent; font-size: 16px; color: #888; cursor: pointer;
+  line-height: 1; padding: 2px 4px;
+}
+.modal-close:hover { color: var(--merah); }
+.modal-box .field { margin-bottom: 10px; }
+.modal-box .btn-login { margin-top: 4px; }
+.modal-box .btn-login + .btn-login { margin-top: 8px; }
+.modal-teks { font-size: 13px; color: #444; line-height: 1.5; margin: 0 0 14px; }
+.btn-login.btn-bahaya { background: var(--merah); }
+.btn-login.btn-bahaya:hover { background: #96261b; }
+.btn-login.btn-batal { background: var(--abu2); color: #555; }
+.btn-login.btn-batal:hover { background: #dadfda; }
 
 /* ---------- Layout utama: full-height, panel kanan full width ---------- */
 .app-shell { display: flex; flex: 1; min-height: 0; }
@@ -176,7 +205,11 @@ button.btn-login:disabled { background: var(--abu-disabled); color: #888; cursor
 }
 
 /* ---------- Toggle Panel Kanan (Rekon / Rangkuman) ---------- */
-.panel-toggle { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.panel-toggle {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.toggle-group { display: flex; gap: 6px; flex-wrap: wrap; }
 .toggle-btn {
   border: 1px solid var(--hijau-muda); background: var(--putih); color: var(--hijau-tua);
   padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer;
@@ -430,15 +463,14 @@ table.tabel-rekon td.outlier-rata { background-color: #fff176 !important; font-w
 
   .info-bar { font-size: 12px; padding: 6px 12px; }
 
-  .toolbar-atas { flex-direction: column; align-items: stretch; }
-
   .rekon-slicer { flex-direction: column; align-items: stretch; gap: 8px; }
   .rekon-slicer .field { min-width: 0; }
 
   .tab-bar { flex-wrap: wrap; }
   .tab-btn { padding: 7px 10px; font-size: 12px; }
 
-  .panel-toggle { flex-direction: column; }
+  .panel-toggle { flex-direction: column; align-items: stretch; }
+  .toggle-group, .toggle-aksi { flex-direction: column; align-items: stretch; }
 
   .tabel-judul { flex-direction: column; align-items: flex-start; gap: 2px; }
 

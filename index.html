@@ -63,18 +63,29 @@
 
     <!-- ---------- PANEL: REKON / ANOMALI / RANGKUMAN ---------- -->
     <div class="panel-kanan" id="panel-rekon">
-        <!-- Toggle pilih tampilan panel -->
+        <!-- Toggle pilih tampilan panel (kiri) + aksi download/upload (kanan) -->
         <div class="panel-toggle" id="panel-toggle">
-          <button type="button" class="toggle-btn aktif" id="btn-view-rekon">Rekonsiliasi Data</button>
-          <button type="button" class="toggle-btn" id="btn-view-anomali">Konfirmasi Anomali</button>
-          <button type="button" class="toggle-btn" id="btn-view-rangkuman">Rangkuman Data</button>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn aktif" id="btn-view-rekon">Rekonsiliasi Data</button>
+            <button type="button" class="toggle-btn" id="btn-view-anomali">Konfirmasi Anomali</button>
+            <button type="button" class="toggle-btn" id="btn-view-rangkuman">Rangkuman Data</button>
+          </div>
+          <div class="toggle-aksi">
+            <button type="button" class="btn-login btn-kecil" id="btn-buka-download">⬇ Download Raw Data (Excel)</button>
+            <label class="btn-login btn-kecil btn-file-label hidden" id="wrap-referensi" for="in-file-referensi">⬆ Upload Referensi ID Tanaman</label>
+            <input type="file" id="in-file-referensi" accept=".xlsx,.xls" class="hidden-file-input">
+          </div>
         </div>
+        <div class="toolbar-status" id="log-referensi"></div>
 
-        <!-- ===== VIEW: REKONSILIASI ===== -->
-        <div id="view-rekon">
-          <!-- Toolbar atas: Download Raw Data + (khusus prov) Upload Referensi ID Tanaman -->
-          <div class="toolbar-atas" id="toolbar-download">
-            <div class="field" style="flex:1 1 130px; min-width:0;">
+        <!-- ===== POPUP: DOWNLOAD RAW DATA ===== -->
+        <div class="modal-overlay hidden" id="modal-download">
+          <div class="modal-box">
+            <div class="modal-title">
+              Download Raw Data (Excel)
+              <button type="button" class="modal-close" id="btn-tutup-download">✕</button>
+            </div>
+            <div class="field">
               <label>Jenis SPH</label>
               <select id="sel-jenis-download">
                 <option value="semua">— Semua SPH —</option>
@@ -84,32 +95,23 @@
                 <option value="th">SPH-TH</option>
               </select>
             </div>
-            <div class="field" style="flex:0 0 100px;">
+            <div class="field">
               <label>Tahun</label>
               <select id="sel-tahun-download"></select>
             </div>
-            <div class="field hidden" id="wrap-kab-download" style="flex:1 1 160px; min-width:0;">
+            <div class="field hidden" id="wrap-kab-download">
               <label>Kabupaten</label>
               <select id="sel-kab-download">
                 <option value="semua">— Semua Kabupaten/Kota —</option>
               </select>
             </div>
-            <div class="field" style="flex:0 0 auto;">
-              <label>&nbsp;</label>
-              <button class="btn-login btn-kecil" id="btn-download">⬇ Download Raw Data (Excel)</button>
-            </div>
-
-            <div class="field hidden" id="wrap-referensi" style="flex:0 0 auto;">
-              <label>&nbsp;</label>
-              <div style="display:flex; gap:6px;">
-                <label class="btn-login btn-kecil btn-file-label" for="in-file-referensi">⬆ Upload Referensi ID Tanaman</label>
-                <input type="file" id="in-file-referensi" accept=".xlsx,.xls" class="hidden-file-input">
-              </div>
-            </div>
+            <button class="btn-login" id="btn-download">⬇ Download Raw Data (Excel)</button>
+            <div class="toolbar-status" id="log-download"></div>
           </div>
-          <div class="toolbar-status" id="log-download"></div>
-          <div class="toolbar-status" id="log-referensi"></div>
+        </div>
 
+        <!-- ===== VIEW: REKONSILIASI ===== -->
+        <div id="view-rekon">
           <div class="rekon-slicer">
             <div class="field">
               <label>Jenis SPH</label>
@@ -196,10 +198,11 @@
           </div>
 
           <div class="anomali-toolbar" id="anomali-toolbar-prov">
-            <button class="btn-login btn-kecil" id="btn-tambah-baris-anomali">+ Tambah Baris</button>
+            <button class="btn-login btn-kecil" id="btn-buka-tambah-anomali">+ Tambah Baris</button>
             <label class="btn-login btn-kecil btn-file-label" for="in-file-anomali">⬆ Upload Excel</label>
             <input type="file" id="in-file-anomali" accept=".xlsx,.xls" class="hidden-file-input">
             <button class="btn-login btn-kecil" id="btn-download-anomali">⬇ Download Excel</button>
+            <button class="btn-login btn-kecil btn-bahaya" id="btn-buka-hapus-anomali">🗑 Hapus Semua Anomali</button>
           </div>
           <div class="anomali-toolbar" id="anomali-toolbar-kabkot">
             <button class="btn-login btn-kecil" id="btn-download-anomali-kabkot">⬇ Download Excel</button>
@@ -207,6 +210,35 @@
 
           <div id="anomali-area">
             <div class="placeholder-kosong">Pilih jenis SPH & kabupaten untuk mulai.</div>
+          </div>
+
+          <!-- ===== POPUP: TAMBAH BARIS ANOMALI ===== -->
+          <div class="modal-overlay hidden" id="modal-tambah-anomali">
+            <div class="modal-box">
+              <div class="modal-title">
+                Tambah Baris Anomali
+                <button type="button" class="modal-close" id="btn-tutup-tambah-anomali">✕</button>
+              </div>
+              <div class="field">
+                <label>Triwulan</label>
+                <select id="sel-tw-tambah-anomali"></select>
+              </div>
+              <button class="btn-login" id="btn-konfirmasi-tambah-anomali">+ Tambah Baris</button>
+            </div>
+          </div>
+
+          <!-- ===== POPUP: HAPUS SEMUA ANOMALI ===== -->
+          <div class="modal-overlay hidden" id="modal-hapus-anomali">
+            <div class="modal-box">
+              <div class="modal-title">
+                Hapus Semua Data Anomali?
+                <button type="button" class="modal-close" id="btn-tutup-hapus-anomali">✕</button>
+              </div>
+              <p class="modal-teks" id="teks-konfirmasi-hapus-anomali"></p>
+              <button class="btn-login" id="btn-backup-lalu-hapus-anomali">⬇ Download Backup Excel, lalu Hapus</button>
+              <button class="btn-login btn-bahaya" id="btn-konfirmasi-hapus-anomali">🗑 Hapus Semua (Tanpa Backup)</button>
+              <button class="btn-login btn-batal" id="btn-batal-hapus-anomali">Batal</button>
+            </div>
           </div>
         </div>
 

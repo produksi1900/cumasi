@@ -326,6 +326,18 @@ $("btn-view-rangkuman").addEventListener("click", () => gantiView("rangkuman"));
 // sinkronisasi desktop), yang jauh lebih stabil dan mudah dicocokkan.
 $("btn-download").addEventListener("click", downloadData);
 
+function bukaModalDownload() {
+  $("modal-download").classList.remove("hidden");
+}
+function tutupModalDownload() {
+  $("modal-download").classList.add("hidden");
+}
+$("btn-buka-download").addEventListener("click", bukaModalDownload);
+$("btn-tutup-download").addEventListener("click", tutupModalDownload);
+$("modal-download").addEventListener("click", (e) => {
+  if (e.target.id === "modal-download") tutupModalDownload();
+});
+
 // Ambil semua baris mentah 1 jenis SPH utk 1 kombinasi tahun+kab.
 async function ambilRowsMentah(jenis, tahun, kabNama) {
   const cfg = SPH_CONFIG[jenis];
@@ -1642,7 +1654,8 @@ $("sel-kab-anomali").addEventListener("change", muatAnomali);
 
 function isProv() { return state.profile?.role === "prov"; }
 
-// Hitung TW saat ini berdasarkan bulan sekarang
+// Hitung TW saat ini berdasarkan bulan sekarang (dipakai sbg default
+// pilihan di popup "Tambah Baris", & fallback saat parsing periode_teks).
 function twSekarang() {
   return Math.ceil((new Date().getMonth() + 1) / 3);
 }
@@ -1926,23 +1939,103 @@ async function hapusBarisAnomali(id, trEl) {
   }
 }
 
-$("btn-tambah-baris-anomali")?.addEventListener("click", async () => {
+// ---- Popup Tambah Baris: provinsi pilih sendiri Triwulan (bebas, tidak
+// selalu TW berjalan) di tahun berjalan sekarang. ----
+function isiPilihanTwTambah() {
+  const sel = $("sel-tw-tambah-anomali");
+  const twDefault = twSekarang();
+  sel.innerHTML = [1, 2, 3, 4]
+    .map((tw) => `<option value="${tw}" ${tw === twDefault ? "selected" : ""}>TW${tw} ${TAHUN_SEKARANG}</option>`)
+    .join("");
+}
+
+function bukaModalTambahAnomali() {
+  isiPilihanTwTambah();
+  $("modal-tambah-anomali").classList.remove("hidden");
+}
+function tutupModalTambahAnomali() {
+  $("modal-tambah-anomali").classList.add("hidden");
+}
+$("btn-buka-tambah-anomali")?.addEventListener("click", bukaModalTambahAnomali);
+$("btn-tutup-tambah-anomali")?.addEventListener("click", tutupModalTambahAnomali);
+$("modal-tambah-anomali")?.addEventListener("click", (e) => {
+  if (e.target.id === "modal-tambah-anomali") tutupModalTambahAnomali();
+});
+
+$("btn-konfirmasi-tambah-anomali")?.addEventListener("click", async () => {
   const jenis = $("sel-jenis-anomali").value;
   const kabId = $("sel-kab-anomali").value;
+  const tw = Number($("sel-tw-tambah-anomali").value);
   const rowsSaatIni = $("anomali-area").querySelectorAll("tbody tr").length;
-  const periodeDef = labelPeriodeDefault();
+  const periodeTeks = `TW${tw} ${TAHUN_SEKARANG}`;
 
   try {
     const { error } = await supabase.from("konfirmasi_anomali").insert({
       jenis, kab_id: kabId,
       no_urut: rowsSaatIni + 1,
-      periode_teks: periodeDef,
+      periode_teks: periodeTeks,
       nama_komoditi: "", kalimat_anomali: "",
     });
     if (error) throw error;
+    tutupModalTambahAnomali();
     await muatAnomali();
   } catch (e) {
     alert("Gagal menambah baris: " + e.message);
+  }
+});
+
+// ---- Popup Hapus Semua Anomali: konfirmasi + opsi backup Excel dulu ----
+function bukaModalHapusAnomali() {
+  const jumlah = $("anomali-area").querySelectorAll("tbody tr").length;
+  if (jumlah === 0) {
+    alert("Tidak ada data anomali untuk kombinasi jenis SPH & kabupaten ini.");
+    return;
+  }
+  $("teks-konfirmasi-hapus-anomali").textContent =
+    `Akan menghapus ${jumlah} baris data anomali untuk kombinasi jenis SPH & kabupaten yang sedang dipilih. Tindakan ini tidak bisa dibatalkan.`;
+  $("modal-hapus-anomali").classList.remove("hidden");
+}
+function tutupModalHapusAnomali() {
+  $("modal-hapus-anomali").classList.add("hidden");
+}
+$("btn-buka-hapus-anomali")?.addEventListener("click", bukaModalHapusAnomali);
+$("btn-tutup-hapus-anomali")?.addEventListener("click", tutupModalHapusAnomali);
+$("btn-batal-hapus-anomali")?.addEventListener("click", tutupModalHapusAnomali);
+$("modal-hapus-anomali")?.addEventListener("click", (e) => {
+  if (e.target.id === "modal-hapus-anomali") tutupModalHapusAnomali();
+});
+
+async function hapusSemuaAnomali() {
+  const jenis = $("sel-jenis-anomali").value;
+  const kabId = $("sel-kab-anomali").value;
+  try {
+    const { error } = await supabase
+      .from("konfirmasi_anomali")
+      .delete()
+      .eq("jenis", jenis)
+      .eq("kab_id", kabId);
+    if (error) throw error;
+    tutupModalHapusAnomali();
+    await muatAnomali();
+  } catch (e) {
+    alert("Gagal menghapus semua data: " + e.message);
+  }
+}
+
+$("btn-konfirmasi-hapus-anomali")?.addEventListener("click", hapusSemuaAnomali);
+
+$("btn-backup-lalu-hapus-anomali")?.addEventListener("click", async () => {
+  const btn = $("btn-backup-lalu-hapus-anomali");
+  btn.disabled = true;
+  btn.textContent = "⏳ Mengunduh backup...";
+  try {
+    const berhasil = await downloadAnomaliExcel();
+    if (berhasil) {
+      await hapusSemuaAnomali();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⬇ Download Backup Excel, lalu Hapus";
   }
 });
 
@@ -2004,11 +2097,11 @@ async function downloadAnomaliExcel() {
     );
   } catch (e) {
     alert("Gagal mengambil data: " + e.message);
-    return;
+    return false;
   }
   if (!rows || rows.length === 0) {
     alert("Tidak ada data untuk didownload.");
-    return;
+    return false;
   }
 
   const wb = XLSX.utils.book_new();
@@ -2036,6 +2129,7 @@ async function downloadAnomaliExcel() {
   const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabId);
   const labelKab = (kabEntry ? kabEntry.nama : kabId).replace(/\s+/g, "");
   XLSX.writeFile(wb, `KonfirmasiAnomali_${jenis.toUpperCase()}_${labelKab}.xlsx`, { cellStyles: true });
+  return true;
 }
 
 // ============================================================
