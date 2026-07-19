@@ -205,9 +205,6 @@ async function masukKeApp() {
       DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
   }
 
-  // Bersihkan data Konfirmasi Anomali dari triwulan sebelumnya (kalau ada)
-  try { await supabase.rpc("bersihkan_anomali_lama"); } catch (e) { /* diamkan, tidak kritis */ }
-
   siapkanSlicerAnomali();
 
   await muatReferensiIdTanaman();
@@ -1066,7 +1063,10 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
     headerLabels,
     kecRows.map((k) => ({
       label: k.nama,
-      data: Array.from({ length: nPeriode }, (_, idx) => matrixUtama.get(`${k.kode}|${idx + 1}`) ?? null),
+      data: Array.from({ length: nPeriode }, (_, idx) => {
+        const v = matrixUtama.get(`${k.kode}|${idx + 1}`) ?? null;
+        return v === 0 ? null : v; // 0 = tidak ada data -> putus garis (spanGaps), bukan titik di angka 0
+      }),
     })),
     tab.satuan
   );
@@ -1798,19 +1798,9 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   return td;
 }
 
-// Label kabupaten yang sedang aktif di panel Anomali -- dipakai buat
-// judul kolom "Konfirmasi <Nama Kab>" biar otomatis ganti sesuai
-// kabupaten yang dipilih (atau kab_id sendiri kalau role kabkot).
-function labelKabAnomaliAktif() {
-  const kabId = $("sel-kab-anomali").value;
-  const entry = DAFTAR_KAB_BABEL.find((d) => d.id === kabId);
-  return entry ? entry.nama : (kabId || "Kabkot");
-}
-
 function renderAnomali(rows) {
   const area = $("anomali-area");
   const prov = isProv();
-  const labelKab = labelKabAnomaliAktif();
 
   if (rows.length === 0 && !prov) {
     area.innerHTML = `<div class="placeholder-kosong">Belum ada anomali yang ditandai Provinsi untuk kombinasi ini.</div>`;
@@ -1822,11 +1812,13 @@ function renderAnomali(rows) {
   tbl.innerHTML = `
     <thead><tr>
       <th class="col-no">No</th>
+      <th class="col-periode">Periode</th>
       <th class="col-bulan">Bulan</th>
       <th>Nama Komoditi</th>
-      <th>Anomali</th>
-      <th>Konfirmasi ${labelKab}</th>
+      <th>Kalimat Anomali</th>
+      <th>Konfirmasi Kabkot</th>
       <th>Approval Provinsi</th>
+      <th>Konfirmasi Ulang</th>
       ${prov ? `<th class="col-hapus"></th>` : ``}
     </tr></thead>`;
   const tbody = document.createElement("tbody");
@@ -1838,10 +1830,24 @@ function renderAnomali(rows) {
     const tdNo = editableTd(r.no_urut ?? "", "no_urut", prov, true);
     tdNo.classList.add("col-no");
 
-    // Bulan tetap ditentukan dari periode_teks yang tersimpan (TW-nya),
-    // cuma kolom "Periode" sendiri sudah tidak ditampilkan lagi.
+    const tdPeriode = editableTd(r.periode_teks ?? "", "periode_teks", prov, false);
+    tdPeriode.classList.add("col-periode");
+    // Kalau periode berubah, perlu update dropdown bulan juga
+    if (prov) {
+      tdPeriode.addEventListener("blur", () => {
+        // Update dropdown bulan di baris yang sama
+        const tdBulanEl = tr.querySelector(".td-bulan");
+        if (tdBulanEl) {
+          const newTd = buatTdBulan(r.id, tdPeriode.textContent.trim(), prov);
+          newTd.classList.add("td-bulan");
+          tdBulanEl.replaceWith(newTd);
+        }
+      });
+    }
+
     const tdBulan = buatTdBulan(r.id, r.periode_teks, prov);
-    tdBulan.classList.add("td-bulan", "col-bulan");
+    tdBulan.classList.add("td-bulan");
+    // Set nilai yang sudah tersimpan kalau ada
     if (prov && r.bulan) {
       const sel = tdBulan.querySelector("select");
       if (sel) sel.value = String(r.bulan);
@@ -1869,12 +1875,17 @@ function renderAnomali(rows) {
       tdApproval.classList.add("terkunci");
     }
 
+    const bolehIsiUlang = !prov && r.approval_provinsi === "tidak";
+    const tdUlang = editableTd(r.konfirmasi_ulang ?? "", "konfirmasi_ulang", bolehIsiUlang, false);
+
     tr.appendChild(tdNo);
+    tr.appendChild(tdPeriode);
     tr.appendChild(tdBulan);
     tr.appendChild(tdKomoditi);
     tr.appendChild(tdKalimat);
     tr.appendChild(tdKabkot);
     tr.appendChild(tdApproval);
+    tr.appendChild(tdUlang);
 
     if (prov) {
       const tdHapus = document.createElement("td");
@@ -1929,35 +1940,14 @@ async function hapusBarisAnomali(id, trEl) {
   }
 }
 
-// ---- Popup Tambah Baris: provinsi pilih sendiri Triwulan (bebas, tidak
-// selalu TW berjalan) di tahun berjalan sekarang. ----
-function isiPilihanTwTambah() {
-  const sel = $("sel-tw-tambah-anomali");
-  const twDefault = twSekarang();
-  sel.innerHTML = [1, 2, 3, 4]
-    .map((tw) => `<option value="${tw}" ${tw === twDefault ? "selected" : ""}>TW${tw} ${TAHUN_SEKARANG}</option>`)
-    .join("");
-}
-
-function bukaModalTambahAnomali() {
-  isiPilihanTwTambah();
-  $("modal-tambah-anomali").classList.remove("hidden");
-}
-function tutupModalTambahAnomali() {
-  $("modal-tambah-anomali").classList.add("hidden");
-}
-$("btn-buka-tambah-anomali")?.addEventListener("click", bukaModalTambahAnomali);
-$("btn-tutup-tambah-anomali")?.addEventListener("click", tutupModalTambahAnomali);
-$("modal-tambah-anomali")?.addEventListener("click", (e) => {
-  if (e.target.id === "modal-tambah-anomali") tutupModalTambahAnomali();
-});
-
-$("btn-konfirmasi-tambah-anomali")?.addEventListener("click", async () => {
+// ---- Tambah Baris: langsung insert baris baru pakai Triwulan & tahun
+// berjalan sekarang (twSekarang()/TAHUN_SEKARANG), tanpa perlu popup lagi --
+// kolom Periode sudah tidak ditampilkan di tabel, jadi gak perlu ditanya user. ----
+$("btn-buka-tambah-anomali")?.addEventListener("click", async () => {
   const jenis = $("sel-jenis-anomali").value;
   const kabId = $("sel-kab-anomali").value;
-  const tw = Number($("sel-tw-tambah-anomali").value);
   const rowsSaatIni = $("anomali-area").querySelectorAll("tbody tr").length;
-  const periodeTeks = `TW${tw} ${TAHUN_SEKARANG}`;
+  const periodeTeks = `TW${twSekarang()} ${TAHUN_SEKARANG}`;
 
   try {
     const { error } = await supabase.from("konfirmasi_anomali").insert({
@@ -1967,7 +1957,6 @@ $("btn-konfirmasi-tambah-anomali")?.addEventListener("click", async () => {
       nama_komoditi: "", kalimat_anomali: "",
     });
     if (error) throw error;
-    tutupModalTambahAnomali();
     await muatAnomali();
   } catch (e) {
     alert("Gagal menambah baris: " + e.message);
