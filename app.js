@@ -1733,14 +1733,12 @@ async function muatAnomali() {
   renderAnomali(rows || []);
 }
 
-// Buat td dropdown bulan berdasarkan periode_teks (mis. "TW2 2026")
+// Buat td dropdown Bulan -- SEKARANG bebas pilih semua 12 bulan (tidak
+// dibatasi ke TW tertentu lagi), dikasih nomor di depan label supaya
+// bisa "diketik cepat" (native <select> browser mendukung typeahead:
+// ngetik "1" lalu "2" cepat akan lompat ke opsi "12 - Desember").
 function buatTdBulan(rowId, periodeTeks, editable) {
   const td = document.createElement("td");
-
-  // Parse TW dari periode_teks
-  const matchTw = String(periodeTeks || "").match(/TW\s*(\d)/i);
-  const tw = matchTw ? Number(matchTw[1]) : twSekarang();
-  const bulanOptions = bulanDalamTw(tw);
 
   if (!editable) {
     td.classList.add("terkunci");
@@ -1752,7 +1750,10 @@ function buatTdBulan(rowId, periodeTeks, editable) {
   sel.className = "sel-bulan-anomali";
   sel.style.cssText = "width:100%;padding:4px 6px;font-size:12px;border:1px solid #ccc;border-radius:4px;";
   sel.innerHTML = `<option value="">— Pilih —</option>` +
-    bulanOptions.map((b) => `<option value="${b}">${NAMA_BULAN[b]}</option>`).join("");
+    NAMA_BULAN.slice(1).map((nama, idx) => {
+      const b = idx + 1;
+      return `<option value="${b}">${String(b).padStart(2, "0")} - ${nama}</option>`;
+    }).join("");
 
   sel.addEventListener("change", async () => {
     await simpanKolomAnomali(rowId, "bulan", sel.value ? Number(sel.value) : null);
@@ -1762,7 +1763,15 @@ function buatTdBulan(rowId, periodeTeks, editable) {
   return td;
 }
 
-// Buat td dropdown komoditi dari referensi id_tanaman
+// ============================================================
+// Combobox Komoditi -- input teks yang bisa diketik/dicari (bukan
+// <select> native lagi). Kenapa diganti: <select> native browser suka
+// buka ke ATAS kalau space di bawah dianggap kurang (perhitungan
+// browser, bukan kita yang atur), dan gak bisa diketik cari. Combobox
+// custom ini: dropdown-nya SELALU nempel di BAWAH input (position:
+// absolute, top:100%), bisa diketik buat filter list-nya, Enter buat
+// pilih hasil teratas, klik pilihan juga bisa.
+// ============================================================
 function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   const td = document.createElement("td");
 
@@ -1774,8 +1783,9 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
 
   const namaList = daftarKomoditiAnomali();
 
+  // Fallback: kalau referensi id_tanaman belum diupload provinsi, tetap
+  // pakai sel biasa contenteditable (teks bebas).
   if (namaList.length === 0) {
-    // Fallback: text editable biasa kalau referensi belum diupload
     td.contentEditable = "true";
     td.textContent = nilaiSaatIni || "";
     td.addEventListener("blur", async () => {
@@ -1784,17 +1794,94 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
     return td;
   }
 
-  const sel = document.createElement("select");
-  sel.className = "sel-komoditi-anomali";
-  sel.style.cssText = "width:100%;padding:4px 6px;font-size:12px;border:1px solid #ccc;border-radius:4px;";
-  sel.innerHTML = `<option value="">— Pilih —</option>` +
-    namaList.map((n) => `<option value="${n}" ${n === nilaiSaatIni ? "selected" : ""}>${n}</option>`).join("");
+  const wrap = document.createElement("div");
+  wrap.className = "combo-wrap";
 
-  sel.addEventListener("change", async () => {
-    await simpanKolomAnomali(rowId, "nama_komoditi", sel.value);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "combo-input";
+  input.autocomplete = "off";
+  input.placeholder = "Ketik utk cari...";
+  input.value = nilaiSaatIni || "";
+
+  const list = document.createElement("div");
+  list.className = "combo-list hidden";
+
+  let nilaiTersimpan = nilaiSaatIni || "";
+
+  function renderList(filterTeks) {
+    const q = normalisasiNamaTanaman(filterTeks || "");
+    const hasil = q
+      ? namaList.filter((n) => normalisasiNamaTanaman(n).includes(q))
+      : namaList;
+    if (hasil.length === 0) {
+      list.innerHTML = `<div class="combo-empty">(tidak ada yang cocok)</div>`;
+    } else {
+      list.innerHTML = hasil.map((n) =>
+        `<div class="combo-option" data-nama="${n.replace(/"/g, "&quot;")}">${n}</div>`
+      ).join("");
+    }
+    list.classList.remove("hidden");
+  }
+
+  async function pilihNama(nama) {
+    input.value = nama;
+    nilaiTersimpan = nama;
+    list.classList.add("hidden");
+    await simpanKolomAnomali(rowId, "nama_komoditi", nama);
+  }
+
+  input.addEventListener("focus", () => renderList(input.value));
+  input.addEventListener("input", () => renderList(input.value));
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const opsiPertama = list.querySelector(".combo-option");
+      if (opsiPertama) {
+        pilihNama(opsiPertama.dataset.nama);
+      } else {
+        // Ketikan gak cocok satupun -- balikin ke nilai tersimpan terakhir
+        input.value = nilaiTersimpan;
+        list.classList.add("hidden");
+      }
+      input.blur();
+    } else if (e.key === "Escape") {
+      input.value = nilaiTersimpan;
+      list.classList.add("hidden");
+      input.blur();
+    }
   });
 
-  td.appendChild(sel);
+  // mousedown (bukan click) supaya kepilih SEBELUM event blur di input nembak
+  list.addEventListener("mousedown", (e) => {
+    const opt = e.target.closest(".combo-option");
+    if (!opt) return;
+    e.preventDefault();
+    pilihNama(opt.dataset.nama);
+  });
+
+  input.addEventListener("blur", () => {
+    // Kasih jeda dikit -- kalau blur ini dipicu klik opsi, mousedown di
+    // atas sudah keburu jalan duluan (preventDefault mencegah blur
+    // membatalkan klik). Kalau bukan, cocokkan ketikan bebas ke list.
+    setTimeout(() => {
+      list.classList.add("hidden");
+      const ketikan = input.value.trim();
+      if (ketikan === nilaiTersimpan) return;
+      const cocok = namaList.find((n) => normalisasiNamaTanaman(n) === normalisasiNamaTanaman(ketikan));
+      if (cocok) {
+        pilihNama(cocok);
+      } else {
+        // Gak cocok ke referensi manapun -- batalkan, balik ke nilai lama
+        input.value = nilaiTersimpan;
+      }
+    }, 150);
+  });
+
+  wrap.appendChild(input);
+  wrap.appendChild(list);
+  td.appendChild(wrap);
   return td;
 }
 
