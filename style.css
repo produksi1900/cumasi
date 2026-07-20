@@ -552,7 +552,7 @@ table.tabel-anomali td.terkunci {
 }
 
 table.tabel-anomali td.col-hapus, table.tabel-anomali th.col-hapus {
-  width: 34px; min-width: 34px;
+  width: 24px; min-width: 24px;
 }
 /* Lebar kolom dikunci pakai CLASS (bukan nth-child) supaya tidak
    bergeser/salah sasaran waktu kolom checkbox (khusus role Provinsi)
@@ -577,7 +577,7 @@ table.tabel-anomali td.col-kabkot, table.tabel-anomali th.col-kabkot {
   min-width: 260px; width: 32%;
 }
 table.tabel-anomali td.col-approval, table.tabel-anomali th.col-approval {
-  width: 110px; min-width: 100px; text-align: center;
+  width: 120px; min-width: 110px; text-align: center;
 }
 table.tabel-anomali select.sel-approval,
 table.tabel-anomali select.sel-tindak-lanjut {
