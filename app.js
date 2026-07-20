@@ -61,6 +61,14 @@ async function fetchAllRows(queryFn) {
 // ============================================================
 const $ = (id) => document.getElementById(id);
 
+// Auto-tinggikan textarea (combo Kecamatan/Komoditi) supaya teks yang
+// tidak muat 1 baris otomatis lanjut ke baris berikutnya di bawah,
+// bukan kepotong.
+function autoGrowTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+
 // ============================================================
 // Loading donut (menggantikan teks "⏳ Memuat data...") — donut
 // muter dengan persentase perkiraan di tengah. Persentase ini BUKAN
@@ -2149,12 +2157,13 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   const wrap = document.createElement("div");
   wrap.className = "combo-wrap";
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "combo-input";
+  const input = document.createElement("textarea");
+  input.rows = 1;
+  input.className = "combo-input-wrap";
   input.autocomplete = "off";
   input.placeholder = "Ketik utk cari...";
   input.value = nilaiSaatIni || "";
+  input.addEventListener("input", () => autoGrowTextarea(input));
 
   const list = document.createElement("div");
   list.className = "combo-list hidden";
@@ -2180,6 +2189,7 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
     input.value = nama;
     nilaiTersimpan = nama;
     list.classList.add("hidden");
+    autoGrowTextarea(input);
     await simpanKolomAnomali(rowId, "nama_komoditi", nama);
   }
 
@@ -2234,6 +2244,7 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   wrap.appendChild(input);
   wrap.appendChild(list);
   td.appendChild(wrap);
+  requestAnimationFrame(() => autoGrowTextarea(input));
   return td;
 }
 
@@ -2264,12 +2275,13 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
   const wrap = document.createElement("div");
   wrap.className = "combo-wrap";
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "combo-input";
+  const input = document.createElement("textarea");
+  input.rows = 1;
+  input.className = "combo-input-wrap";
   input.autocomplete = "off";
   input.placeholder = "Ketik utk cari...";
   input.value = nilaiSaatIni || "";
+  input.addEventListener("input", () => autoGrowTextarea(input));
 
   const list = document.createElement("div");
   list.className = "combo-list hidden";
@@ -2289,6 +2301,7 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
     input.value = nama;
     nilaiTersimpan = nama;
     list.classList.add("hidden");
+    autoGrowTextarea(input);
     await simpanKolomAnomali(rowId, "kecamatan", nama);
   }
 
@@ -2337,6 +2350,7 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
   wrap.appendChild(input);
   wrap.appendChild(list);
   td.appendChild(wrap);
+  requestAnimationFrame(() => autoGrowTextarea(input));
   return td;
 }
 

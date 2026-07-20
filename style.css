@@ -572,6 +572,13 @@ table.tabel-anomali td.col-kecamatan, table.tabel-anomali th.col-kecamatan {
 table.tabel-anomali td.col-komoditi, table.tabel-anomali th.col-komoditi {
   width: 106px; min-width: 96px;
 }
+/* Header "Nama Komoditi" wrap 2 baris, sama pola kayak th.col-approval */
+table.tabel-anomali th.col-komoditi {
+  white-space: normal;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.3;
+}
 table.tabel-anomali td.col-anomali, table.tabel-anomali th.col-anomali {
   min-width: 300px; width: 36%;
 }
@@ -616,6 +623,18 @@ table.tabel-anomali select.sel-approval.approval-tidak { background: #fdecea; co
   border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
 }
 .combo-input:focus { outline: 2px solid var(--hijau-muda); outline-offset: -1px; }
+/* Versi combo-input yang boleh wrap ke bawah (Kecamatan & Nama Komoditi) --
+   pakai <textarea> bukan <input>, karena <input> tidak pernah bisa
+   menampilkan teksnya lebih dari 1 baris. */
+.combo-input-wrap {
+  width: 100%; padding: 4px 6px; font-size: 12px;
+  border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+  font-family: inherit; line-height: 1.3;
+  white-space: pre-wrap; word-break: break-word;
+  resize: none; overflow: hidden;
+  display: block;
+}
+.combo-input-wrap:focus { outline: 2px solid var(--hijau-muda); outline-offset: -1px; }
 .combo-list {
   /* Dulu "right:0" -- lebar dropdown jadi ikut lebar kolom aslinya
      (kadang sempit, mis. kolom Bulan/Kecamatan yg cuma ~60-90px),
