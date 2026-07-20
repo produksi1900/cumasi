@@ -2315,7 +2315,7 @@ function buatTdTindakLanjut(rowId, nilaiSaatIni, editable) {
   const sel = document.createElement("select");
   sel.className = "sel-tindak-lanjut";
   sel.innerHTML = `
-    <option value="" ${!nilaiSaatIni ? "selected" : ""}>— Pilih —</option>
+    <option value="" ${!nilaiSaatIni ? "selected" : ""}>Belum</option>
     <option value="wajar" ${nilaiSaatIni === "wajar" ? "selected" : ""}>Wajar</option>
     <option value="perbaikan" ${nilaiSaatIni === "perbaikan" ? "selected" : ""}>Perbaikan</option>`;
   sel.addEventListener("change", async () => {
@@ -2445,7 +2445,7 @@ function renderAnomali(rows) {
       const sel = document.createElement("select");
       sel.className = "sel-approval approval-" + (r.approval_provinsi || "kosong");
       sel.innerHTML = `
-        <option value="" ${!r.approval_provinsi ? "selected" : ""}>— Belum —</option>
+        <option value="" ${!r.approval_provinsi ? "selected" : ""}>Belum</option>
         <option value="ya" ${r.approval_provinsi === "ya" ? "selected" : ""}>Ya</option>
         <option value="tidak" ${r.approval_provinsi === "tidak" ? "selected" : ""}>Tidak</option>`;
       sel.addEventListener("change", async () => {
@@ -2454,7 +2454,7 @@ function renderAnomali(rows) {
       });
       tdApproval.appendChild(sel);
     } else {
-      tdApproval.textContent = r.approval_provinsi === "ya" ? "Ya" : r.approval_provinsi === "tidak" ? "Tidak" : "— Belum —";
+      tdApproval.textContent = r.approval_provinsi === "ya" ? "Ya" : r.approval_provinsi === "tidak" ? "Tidak" : "Belum";
       tdApproval.classList.add("terkunci");
     }
 

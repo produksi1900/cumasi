@@ -524,7 +524,10 @@ table.tabel-anomali td {
   overflow-wrap: anywhere;
 }
 table.tabel-anomali { table-layout: fixed; }
-table.tabel-anomali th { background-color: var(--hijau-muda); color: var(--putih); position: sticky; top: 0; z-index: 3; font-size: 12px; }
+table.tabel-anomali th {
+  background-color: var(--hijau-muda); color: var(--putih); position: sticky; top: 0; z-index: 3; font-size: 12px;
+  vertical-align: middle; padding-top: 10px; padding-bottom: 10px;
+}
 table.tabel-anomali th.th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 table.tabel-anomali th.th-sortable:hover { background-color: var(--hijau-tua); }
 table.tabel-anomali td.col-no, table.tabel-anomali th.col-no {
@@ -592,11 +595,13 @@ table.tabel-anomali select.sel-tindak-lanjut {
 table.tabel-anomali select.sel-approval.approval-ya { background: #eafaf1; color: var(--hijau-tua); font-weight: bold; }
 table.tabel-anomali select.sel-approval.approval-tidak { background: #fdecea; color: var(--merah); font-weight: bold; }
 
-td.col-hapus { text-align: center; width: 34px; }
+td.col-hapus { text-align: center; vertical-align: middle; width: 34px; }
 .btn-hapus-baris {
   border: none; background: transparent; color: var(--merah); cursor: pointer; font-size: 16px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border-radius: 4px;
 }
-.btn-hapus-baris:hover { opacity: .7; }
+.btn-hapus-baris:hover { background: #fdecea; opacity: 1; }
 
 .status-simpan-anomali {
   font-size: 11px; color: #888; font-style: italic; margin-left: 6px;
