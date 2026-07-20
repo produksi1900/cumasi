@@ -529,7 +529,7 @@ table.tabel-anomali td.col-chk, table.tabel-anomali th.col-chk {
   text-align: center; width: 30px; min-width: 30px; white-space: nowrap;
 }
 table.tabel-anomali td.col-bulan, table.tabel-anomali th.col-bulan {
-  width: 92px; min-width: 84px; white-space: nowrap;
+  width: 64px; min-width: 60px; white-space: nowrap;
 }
 table.tabel-anomali tr:nth-child(even) td { background-color: #f8f8f8; }
 
@@ -557,19 +557,19 @@ table.tabel-anomali td.col-hapus, table.tabel-anomali th.col-hapus {
    penting utk dibaca/ditulis), Approval Provinsi dikunci ngepas +
    center. */
 table.tabel-anomali td.col-kecamatan, table.tabel-anomali th.col-kecamatan {
-  width: 130px; min-width: 110px;
+  width: 96px; min-width: 88px;
 }
 table.tabel-anomali td.col-komoditi, table.tabel-anomali th.col-komoditi {
-  width: 140px; min-width: 120px;
+  width: 106px; min-width: 96px;
 }
 table.tabel-anomali td.col-anomali, table.tabel-anomali th.col-anomali {
-  min-width: 260px; width: 30%;
+  min-width: 300px; width: 36%;
 }
 table.tabel-anomali td.col-tindak-lanjut, table.tabel-anomali th.col-tindak-lanjut {
   width: 110px; min-width: 100px; text-align: center;
 }
 table.tabel-anomali td.col-kabkot, table.tabel-anomali th.col-kabkot {
-  min-width: 220px; width: 28%;
+  min-width: 260px; width: 32%;
 }
 table.tabel-anomali td.col-approval, table.tabel-anomali th.col-approval {
   width: 110px; min-width: 100px; text-align: center;

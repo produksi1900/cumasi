@@ -161,7 +161,12 @@ async function masukKeApp() {
   state.profile = profile;
 
   // ---- Update UI: header ----
-  const labelUser = `${profile.nama_tampil} (${profile.role === "prov" ? "Provinsi" : "Kab/Kota"})`;
+  // Akun prov "akses_terbatas" (mis. sph1900) sengaja TIDAK menampilkan
+  // nama_tampil-nya di header -- cukup "Provinsi" saja, supaya identitas
+  // akun ini tidak terlalu menonjol dibanding provinsi biasa.
+  const labelUser = profile.akses_terbatas
+    ? "Provinsi"
+    : `${profile.nama_tampil} (${profile.role === "prov" ? "Provinsi" : "Kab/Kota"})`;
   $("lbl-user").textContent = labelUser;
   $("lbl-user").classList.remove("hidden");
   $("btn-logout").classList.remove("hidden");
@@ -1646,7 +1651,7 @@ async function downloadRangkumanExcel() {
     log.textContent = `✗ Gagal: ${e.message}`;
   } finally {
     btn.disabled = false;
-    btn.textContent = "⬇ Download Rangkuman Excel (Semua SPH)";
+    btn.textContent = "⬇ Download Tabulasi Data SPH";
   }
 }
 
@@ -1774,6 +1779,12 @@ function siapkanSlicerAnomali() {
     const terbatas = isProvTerbatas();
     $("btn-buka-tambah-anomali").classList.toggle("hidden", terbatas);
     $("lbl-upload-anomali").classList.toggle("hidden", terbatas);
+    // Akun prov terbatas (mis. sph1900) tidak boleh menghapus baris
+    // sama sekali -- baik satu-satu (X per baris, kolom checkboxnya
+    // sudah otomatis hilang lewat provFull di renderAnomali) maupun
+    // massal (Hapus Terpilih / Hapus Semua Anomali).
+    $("btn-hapus-terpilih-anomali").classList.toggle("hidden", terbatas);
+    $("btn-buka-hapus-anomali").classList.toggle("hidden", terbatas);
   }
 }
 
@@ -2320,6 +2331,10 @@ function labelKabAnomaliAktif() {
 function renderAnomali(rows) {
   const area = $("anomali-area");
   const prov = isProv();
+  // provFull: provinsi dengan akses PENUH (bukan akun terbatas seperti
+  // sph1900) -- cuma provFull yang boleh centang baris & hapus baris
+  // satu-satu (kolom checkbox + tombol ✕).
+  const provFull = prov && !isProvTerbatas();
   const labelKab = labelKabAnomaliAktif();
   const jenisAktif = $("sel-jenis-anomali").value;
 
@@ -2346,7 +2361,7 @@ function renderAnomali(rows) {
 
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  if (prov) {
+  if (provFull) {
     const thChk = document.createElement("th");
     thChk.className = "col-chk";
     const chkSemua = document.createElement("input");
@@ -2384,7 +2399,7 @@ function renderAnomali(rows) {
     });
     trHead.appendChild(th);
   });
-  if (prov) {
+  if (provFull) {
     const thHapus = document.createElement("th");
     thHapus.className = "col-hapus";
     trHead.appendChild(thHapus);
@@ -2446,7 +2461,7 @@ function renderAnomali(rows) {
     tr.appendChild(tdKabkot);
     tr.appendChild(tdApproval);
 
-    if (prov) {
+    if (provFull) {
       const tdChk = document.createElement("td");
       tdChk.className = "col-chk";
       const chk = document.createElement("input");
@@ -2457,7 +2472,7 @@ function renderAnomali(rows) {
       tr.insertBefore(tdChk, tr.firstChild);
     }
 
-    if (prov) {
+    if (provFull) {
       const tdHapus = document.createElement("td");
       tdHapus.className = "col-hapus";
       tdHapus.innerHTML = `<button class="btn-hapus-baris" title="Hapus baris">✕</button>`;
