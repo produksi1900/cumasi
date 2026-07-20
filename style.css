@@ -599,7 +599,17 @@ td.col-hapus { text-align: center; width: 34px; }
 }
 .combo-input:focus { outline: 2px solid var(--hijau-muda); outline-offset: -1px; }
 .combo-list {
-  position: absolute; top: 100%; left: 0; right: 0;
+  /* Dulu "right:0" -- lebar dropdown jadi ikut lebar kolom aslinya
+     (kadang sempit, mis. kolom Bulan/Kecamatan yg cuma ~60-90px),
+     jadi teks pilihan gampang kepotong/susah dibaca. Sekarang dropdown
+     dibuat SELALU cukup lebar (min-width) mengikuti isi teksnya
+     (width: max-content), lepas dari lebar kolom/input aslinya --
+     cukup nempel rata kiri ke input (left:0), boleh "meluber" ke kanan
+     melewati batas kolom. */
+  position: absolute; top: 100%; left: 0;
+  min-width: 200px;
+  width: max-content;
+  max-width: 320px;
   margin-top: 2px;
   background: var(--putih);
   border: 1px solid #ccc; border-radius: 4px;
