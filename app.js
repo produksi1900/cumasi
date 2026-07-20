@@ -2147,6 +2147,7 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   // pakai sel biasa contenteditable (teks bebas).
   if (namaList.length === 0) {
     td.contentEditable = "true";
+    td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
     td.textContent = nilaiSaatIni || "";
     td.addEventListener("blur", async () => {
       await simpanKolomAnomali(rowId, "nama_komoditi", td.textContent.trim());
@@ -2265,6 +2266,7 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
     // Fallback: belum ada data kecamatan tersinkron utk kab ini -- pakai
     // sel bebas ketik biasa.
     td.contentEditable = "true";
+    td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
     td.textContent = nilaiSaatIni || "";
     td.addEventListener("blur", async () => {
       await simpanKolomAnomali(rowId, "kecamatan", td.textContent.trim());
@@ -2555,6 +2557,7 @@ function editableTd(value, field, editable, isNumber) {
     return td;
   }
   td.contentEditable = "true";
+  td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
   td.addEventListener("blur", async () => {
     let v = td.textContent.trim();
     if (isNumber) v = Number(v) || 0;

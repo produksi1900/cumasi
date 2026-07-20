@@ -557,7 +557,12 @@ table.tabel-anomali td.terkunci {
 table.tabel-anomali td.col-hapus, table.tabel-anomali th.col-hapus {
   width: 36px; min-width: 36px; max-width: 36px;
   padding: 4px 2px;
-  text-align: center; vertical-align: middle;
+  text-align: center;
+  /* Sejajar ke ATAS (sama seperti sel lain, mis. dropdown Approval
+     Provinsi) -- sebelumnya "middle" bikin tombol ✕ turun ke tengah
+     baris kalau barisnya tinggi (mis. teks Anomali panjang), jadi
+     kelihatan "ngambang" gak sejajar sama dropdown di sebelahnya. */
+  vertical-align: top;
 }
 /* Lebar kolom dikunci pakai CLASS (bukan nth-child) supaya tidak
    bergeser/salah sasaran waktu kolom checkbox (khusus role Provinsi)
@@ -759,7 +764,11 @@ table.tabel-dashboard-anomali tr.baris-total-dashboard td {
 }
 .loading-donut-pct {
   position: relative;
-  margin-top: -46px;
+  /* Harus -(tinggi donut + gap flex induk) supaya kotak ini "menimpa"
+     tepat posisi donut, bukan cuma -46px (lupa hitung gap:10px di
+     .loading-donut-wrap) -- sebelumnya teks jadi turun ke bawah donut,
+     bukan pas di tengah. 64px (tinggi donut) + 10px (gap) = 74px. */
+  margin-top: -74px;
   font-size: 13px; font-weight: bold; color: var(--hijau-tua);
   width: 64px; height: 64px;
   display: flex; align-items: center; justify-content: center;
