@@ -19,7 +19,7 @@ const state = {
 
 const TAHUN_AWAL = 2018;
 const TAHUN_SEKARANG = new Date().getFullYear();
-const KAB_ANOMALI_LIST = ["Bangka", "Belitung", "Bangka Barat", "Bangka Selatan", "Bangka Tengah", "Belitung Timur", "Kota Pangkal Pinang"];
+const KAB_ANOMALI_LIST = ["Bangka", "Belitung", "Bangka Barat", "Bangka Tengah", "Bangka Selatan", "Belitung Timur", "Kota Pangkal Pinang"];
 
 // ============================================================
 // PENTING — fetchAllRows()
@@ -1950,7 +1950,47 @@ const KOLOM_ANOMALI_SORTABLE = [
   { key: "approval_provinsi", label: "Approval Provinsi", tipe: "teks" },
 ];
 
+// Sort DEFAULT (kolom "no_urut"): bukan cuma angka no_urut polos (yang
+// nilainya direset per-kabupaten jadi 1,1,1,... di database) -- tapi
+// compound-sort: Kabupaten (ikut urutan KAB_ANOMALI_LIST) -> Nama
+// Komoditi (ikut urutan referensi id_tanaman, sama seperti dropdown
+// Komoditi di panel Rekon/Tambah Baris) -> Bulan/Triwulan -> baru
+// no_urut asli sbg tie-breaker terakhir. Ini supaya urutan tampil di
+// mode "Semua Kabupaten/Kota" konsisten & rapi, bukan asal urutan hasil
+// fetch per kab.
+function bandingkanDefaultAnomali(a, b) {
+  const jenis = $("sel-jenis-anomali").value;
+  const urutanMap = state.idTanamanUrutan[jenis] || {};
+
+  const ika = KAB_ANOMALI_LIST.indexOf(a.kab_id);
+  const ikb = KAB_ANOMALI_LIST.indexOf(b.kab_id);
+  const kaba = ika === -1 ? 999 : ika;
+  const kabb = ikb === -1 ? 999 : ikb;
+  if (kaba !== kabb) return kaba - kabb;
+
+  const ua = urutanMap[normalisasiNamaTanaman(a.nama_komoditi)];
+  const ub = urutanMap[normalisasiNamaTanaman(b.nama_komoditi)];
+  if (ua !== undefined && ub !== undefined && ua !== ub) return ua - ub;
+  if (ua !== undefined && ub === undefined) return -1;
+  if (ua === undefined && ub !== undefined) return 1;
+  if (ua === undefined && ub === undefined) {
+    const cmpNama = String(a.nama_komoditi ?? "").toLowerCase()
+      .localeCompare(String(b.nama_komoditi ?? "").toLowerCase(), "id");
+    if (cmpNama !== 0) return cmpNama;
+  }
+
+  const ba = a.bulan ?? 999;
+  const bb = b.bulan ?? 999;
+  if (ba !== bb) return ba - bb;
+
+  return (a.no_urut ?? 0) - (b.no_urut ?? 0);
+}
+
 function bandingkanAnomali(a, b, kolom, tipe, arah) {
+  if (kolom === "no_urut") {
+    const cmp = bandingkanDefaultAnomali(a, b);
+    return arah === "asc" ? cmp : -cmp;
+  }
   let va = a[kolom];
   let vb = b[kolom];
   if (tipe === "angka") {
