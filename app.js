@@ -120,6 +120,21 @@ function isiPilihanTahun(select, { withPilihSemua = false } = {}) {
   }
 }
 
+// Khusus dropdown Tahun di panel Konfirmasi Anomali: ada opsi
+// "— Semua Tahun —" (value "semua") supaya baris anomali lama yang
+// tahunnya belum diketahui (mis. hasil migrasi data lama yang gagal
+// dibaca tahunnya dari periode_teks) tetap bisa dilihat. Default yang
+// dipilih tetap tahun berjalan sekarang, bukan "semua".
+function isiPilihanTahunAnomali(select) {
+  select.innerHTML = `<option value="semua">— Semua Tahun —</option>`;
+  for (let y = TAHUN_SEKARANG; y >= TAHUN_AWAL; y--) {
+    const opt = document.createElement("option");
+    opt.value = String(y); opt.textContent = String(y);
+    select.appendChild(opt);
+  }
+  select.value = String(TAHUN_SEKARANG);
+}
+
 function iqrBounds(values) {
   const arr = values.filter((v) => v && !Number.isNaN(v) && v !== 0).sort((a, b) => a - b);
   if (arr.length < 4) return [null, null];
@@ -268,6 +283,7 @@ async function masukKeApp() {
       DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
   }
 
+  isiPilihanTahunAnomali($("sel-tahun-anomali"));
   siapkanSlicerAnomali();
 
   await muatReferensiIdTanaman();
@@ -1715,6 +1731,14 @@ $("btn-download-rangkuman").addEventListener("click", downloadRangkumanExcel);
 // ============================================================
 $("sel-jenis-anomali").addEventListener("change", muatAnomali);
 $("sel-kab-anomali").addEventListener("change", muatAnomali);
+$("sel-tahun-anomali").addEventListener("change", muatAnomali);
+
+// Nilai tahun aktif dari dropdown slicer: angka (mis. 2026), atau null
+// kalau user memilih "— Semua Tahun —" (value "semua").
+function tahunAnomaliAktif() {
+  const v = $("sel-tahun-anomali").value;
+  return v === "semua" || v === "" ? null : Number(v);
+}
 
 function isProv() { return state.profile?.role === "prov"; }
 
@@ -1865,8 +1889,11 @@ async function muatAnomali() {
   if (isProv() && !isProvTerbatas()) {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
-      btnTambah.disabled = modeSemua;
-      btnTambah.title = modeSemua ? "Pilih kabupaten spesifik untuk menambah baris" : "";
+      const tahunSemua = tahunAnomaliAktif() === null;
+      btnTambah.disabled = modeSemua || tahunSemua;
+      btnTambah.title = modeSemua
+        ? "Pilih kabupaten spesifik untuk menambah baris"
+        : (tahunSemua ? "Pilih tahun spesifik untuk menambah baris" : "");
     }
     // Upload Excel TIDAK perlu didisable di mode "Semua Kabupaten/Kota"
     // lagi -- kabupaten sekarang dibaca otomatis dari kolom
@@ -1875,6 +1902,8 @@ async function muatAnomali() {
   }
 
   mulaiLoadingDonut(area);
+
+  const tahunAktif = tahunAnomaliAktif(); // null = "Semua Tahun"
 
   let rows;
   try {
@@ -1887,26 +1916,20 @@ async function muatAnomali() {
       // jadi urutan hasil gabungan tetap sama seperti sebelumnya.
       const hasilPerKab = await Promise.all(
         KAB_ANOMALI_LIST.map((kab) =>
-          fetchAllRows((from, to) =>
-            supabase
-              .from("konfirmasi_anomali")
-              .select("*")
-              .eq("jenis", jenis).eq("kab_id", kab)
-              .order("no_urut", { ascending: true })
-              .range(from, to)
-          )
+          fetchAllRows((from, to) => {
+            let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kab);
+            if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+            return q.order("no_urut", { ascending: true }).range(from, to);
+          })
         )
       );
       rows = hasilPerKab.flat();
     } else {
-      rows = await fetchAllRows((from, to) =>
-        supabase
-          .from("konfirmasi_anomali")
-          .select("*")
-          .eq("jenis", jenis).eq("kab_id", kabId)
-          .order("no_urut", { ascending: true })
-          .range(from, to)
-      );
+      rows = await fetchAllRows((from, to) => {
+        let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kabId);
+        if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+        return q.order("no_urut", { ascending: true }).range(from, to);
+      });
     }
   } catch (e) {
     area.innerHTML = `<div class="placeholder-kosong">Gagal memuat data: ${e.message}</div>`;
@@ -2567,12 +2590,16 @@ function renderAnomali(rows) {
   const labelKab = labelKabAnomaliAktif();
   const jenisAktif = $("sel-jenis-anomali").value;
 
-  // Mode semua: tombol Tambah Baris dinonaktifkan (harus pilih kab dulu)
+  // Mode semua kab / semua tahun: tombol Tambah Baris dinonaktifkan
+  // (harus pilih kab & tahun spesifik dulu)
   if (prov && !isProvTerbatas()) {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
-      btnTambah.disabled = modeSemua;
-      btnTambah.title = modeSemua ? "Pilih kabupaten spesifik untuk menambah baris" : "";
+      const tahunSemua = tahunAnomaliAktif() === null;
+      btnTambah.disabled = modeSemua || tahunSemua;
+      btnTambah.title = modeSemua
+        ? "Pilih kabupaten spesifik untuk menambah baris"
+        : (tahunSemua ? "Pilih tahun spesifik untuk menambah baris" : "");
     }
   }
 
@@ -2683,6 +2710,7 @@ function renderAnomali(rows) {
     tr.dataset.id = r.id;
     // Simpan kab_id di row supaya bisa dibaca saat sort kolom Kabupaten
     tr.dataset.kabId = r.kab_id || "";
+    tr.dataset.tahun = r.tahun ?? "";
 
     // Mode "Semua Kabupaten/Kota": kolom No ditampilkan jalan terus
     // 1,2,3,... mengikuti urutan baris yang tampil -- BUKAN no_urut asli
@@ -2839,21 +2867,24 @@ async function hapusBarisAnomali(id, trEl) {
     // Mode semua: kab_id diambil dari dataset baris ybs, bukan dari dropdown
     const kabIdDropdown = $("sel-kab-anomali").value;
     const kabId = kabIdDropdown === "semua" ? (trEl?.dataset.kabId || "") : kabIdDropdown;
+    // Tahun juga diambil dari dataset baris ybs (baris itu sendiri sudah
+    // pasti tahu tahunnya sendiri, terlepas dropdown Tahun sedang di
+    // posisi "Semua Tahun" atau tahun spesifik) -- supaya renumbering di
+    // bawah tetap benar per tahun yang sama dgn baris yang dihapus.
+    const tahunBaris = trEl?.dataset.tahun ? Number(trEl.dataset.tahun) : null;
 
     const { error } = await supabase.from("konfirmasi_anomali").delete().eq("id", id);
     if (error) throw error;
 
-    // Renomori ulang No baris yang tersisa biar urut rapi (1,2,3,...),
-    // gak ada yang "bolong" bekas baris yang dihapus.
+    // Renomori ulang No baris yang tersisa (kombinasi jenis+kab+tahun yg
+    // sama) biar urut rapi (1,2,3,...), gak ada yang "bolong" bekas baris
+    // yang dihapus.
     if (kabId) {
-      const sisa = await fetchAllRows((from, to) =>
-        supabase
-          .from("konfirmasi_anomali")
-          .select("id, no_urut")
-          .eq("jenis", jenis).eq("kab_id", kabId)
-          .order("no_urut", { ascending: true })
-          .range(from, to)
-      );
+      const sisa = await fetchAllRows((from, to) => {
+        let q = supabase.from("konfirmasi_anomali").select("id, no_urut").eq("jenis", jenis).eq("kab_id", kabId);
+        if (tahunBaris !== null) q = q.eq("tahun", tahunBaris);
+        return q.order("no_urut", { ascending: true }).range(from, to);
+      });
       for (let i = 0; i < sisa.length; i++) {
         const nomorBaru = i + 1;
         if (sisa[i].no_urut !== nomorBaru) {
@@ -2901,16 +2932,14 @@ async function hapusTerpilihAnomali() {
     const { error } = await supabase.from("konfirmasi_anomali").delete().in("id", ids);
     if (error) throw error;
 
-    // Renomori ulang No baris yang tersisa (kombinasi jenis+kab yg sama
-    // dgn yg sedang tampil), biar tetap urut 1,2,3,... tanpa bolong.
-    const sisa = await fetchAllRows((from, to) =>
-      supabase
-        .from("konfirmasi_anomali")
-        .select("id, no_urut")
-        .eq("jenis", jenis).eq("kab_id", kabId)
-        .order("no_urut", { ascending: true })
-        .range(from, to)
-    );
+    // Renomori ulang No baris yang tersisa (kombinasi jenis+kab+tahun yg
+    // sama dgn yg sedang tampil), biar tetap urut 1,2,3,... tanpa bolong.
+    const tahunAktif = tahunAnomaliAktif();
+    const sisa = await fetchAllRows((from, to) => {
+      let q = supabase.from("konfirmasi_anomali").select("id, no_urut").eq("jenis", jenis).eq("kab_id", kabId);
+      if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+      return q.order("no_urut", { ascending: true }).range(from, to);
+    });
     for (let i = 0; i < sisa.length; i++) {
       const nomorBaru = i + 1;
       if (sisa[i].no_urut !== nomorBaru) {
@@ -2932,25 +2961,30 @@ async function hapusTerpilihAnomali() {
 $("btn-buka-tambah-anomali")?.addEventListener("click", async () => {
   const jenis = $("sel-jenis-anomali").value;
   const kabId = $("sel-kab-anomali").value;
-  const periodeTeks = `TW${twSekarang()} ${TAHUN_SEKARANG}`;
+  const tahunAktif = tahunAnomaliAktif();
+  if (tahunAktif === null) {
+    alert("Pilih dulu Tahun spesifik di dropdown (bukan \"— Semua Tahun —\") sebelum menambah baris.");
+    return;
+  }
+  const periodeTeks = `TW${twSekarang()} ${tahunAktif}`;
 
   try {
     // PENTING: No urut baris baru WAJIB dihitung dari DATA ASLI di
-    // database utk kombinasi jenis+kab yang sedang aktif -- BUKAN dari
-    // jumlah <tr> yang kebetulan sedang tampil di #anomali-area. Kalau
-    // yang lagi tampil di layar itu tabel Dashboard Anomali (bukan
+    // database utk kombinasi jenis+kab+tahun yang sedang aktif -- BUKAN
+    // dari jumlah <tr> yang kebetulan sedang tampil di #anomali-area.
+    // Kalau yang lagi tampil di layar itu tabel Dashboard Anomali (bukan
     // daftar list), jumlah barisnya sama sekali tidak nyambung dgn
-    // jenis+kab yg aktif (bisa gabungan banyak kab & jenis lain), jadi
-    // no_urut yang dihasilkan jadi salah/meloncat (mis. jadi "10").
+    // jenis+kab+tahun yg aktif (bisa gabungan banyak kab & jenis lain),
+    // jadi no_urut yang dihasilkan jadi salah/meloncat (mis. jadi "10").
     const rowsSaatIni = await fetchAllRows((from, to) =>
       supabase.from("konfirmasi_anomali").select("id")
-        .eq("jenis", jenis).eq("kab_id", kabId)
+        .eq("jenis", jenis).eq("kab_id", kabId).eq("tahun", tahunAktif)
         .range(from, to)
     );
     const noUrutBaru = (rowsSaatIni?.length || 0) + 1;
 
     const { error } = await supabase.from("konfirmasi_anomali").insert({
-      jenis, kab_id: kabId,
+      jenis, kab_id: kabId, tahun: tahunAktif,
       no_urut: noUrutBaru,
       periode_teks: periodeTeks,
       kecamatan: "", nama_komoditi: "", kalimat_anomali: "", tindak_lanjut: "",
@@ -3059,7 +3093,7 @@ function bukaModalGenerateAnomali() {
     const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabId);
     $("txt-kab-generate").textContent = kabEntry ? kabEntry.nama : kabId;
   }
-  isiPilihanTahun($("sel-tahun-generate-anomali"));
+  $("txt-tahun-generate").textContent = $("sel-tahun-anomali").value;
   $("log-generate-anomali").textContent = "";
   $("modal-generate-anomali").classList.remove("hidden");
 }
@@ -3116,7 +3150,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
 
     const existing = await fetchAllRows((from, to) =>
       supabase.from("konfirmasi_anomali").select("kecamatan, nama_komoditi, bulan")
-        .eq("jenis", jenis).eq("kab_id", kabId).range(from, to)
+        .eq("jenis", jenis).eq("kab_id", kabId).eq("tahun", tahun).range(from, to)
     );
     const existSet = new Set(
       (existing || []).map((e) => `${normalisasiNamaTanaman(e.kecamatan)}|${normalisasiNamaTanaman(e.nama_komoditi)}|${e.bulan}`)
@@ -3161,7 +3195,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
         const labelPeriode = periodeCol === "triwulan" ? `Tw${per}` : (cfg.periodeLabels[per - 1] || per);
 
         barisBaru.push({
-          jenis, kab_id: kabId,
+          jenis, kab_id: kabId, tahun,
           no_urut: noUrut,
           periode_teks: `${labelPeriode} ${tahun}`,
           kecamatan: namaKec,
@@ -3193,7 +3227,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
 
 async function generateAnomaliDariOutlier() {
   const kabId = $("sel-kab-anomali").value;
-  const tahun = Number($("sel-tahun-generate-anomali").value);
+  const tahun = Number($("sel-tahun-anomali").value);
   const btn = $("btn-generate-anomali");
   const log = $("log-generate-anomali");
   const modeSemua = kabId === "semua";
@@ -3213,16 +3247,21 @@ async function generateAnomaliDariOutlier() {
       ringkasan.push(...hasil.ringkasan);
     }
 
+    // Pesan singkat 1 baris saja (rincian per kab/jenis dicatat di
+    // console, bukan ditampilkan -- supaya kotak log tidak kepanjangan/
+    // kepotong dan tetap kelihatan penuh tanpa perlu geser layar).
+    console.log("Generate Anomali:", ringkasan.join(" | "));
     log.textContent = totalDitambah > 0
-      ? `✓ Selesai! ${totalDitambah} baris anomali ditambahkan.\n${ringkasan.join("\n")}`
-      : `Tidak ada outlier baru yang ditemukan.\n${ringkasan.join("\n")}`;
+      ? `✓ Selesai! ${totalDitambah} baris anomali baru ditambahkan (tahun ${tahun}).`
+      : `Tidak ada outlier baru ditemukan (tahun ${tahun}).`;
 
     if (totalDitambah > 0) {
       setTimeout(() => tutupModalGenerateAnomali(), 1200);
       await muatAnomali(); // refresh tampilan list utk jenis+kab yg sedang aktif di dropdown
     }
   } catch (e) {
-    log.textContent = `✗ Gagal: ${e.message}${ringkasan.length ? "\n" + ringkasan.join("\n") : ""}`;
+    console.log("Generate Anomali gagal, ringkasan sejauh ini:", ringkasan.join(" | "));
+    log.textContent = `✗ Gagal: ${e.message}`;
   } finally {
     btn.disabled = false;
     btn.textContent = "⚡ Generate Anomali";
@@ -3265,15 +3304,21 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
   // dropdown sedang "semua" DAN baris itu juga tidak punya info
   // kabupaten, baris itu terpaksa dilewati (dilaporkan di ringkasan).
   const kabDropdown = $("sel-kab-anomali").value;
+  // tahunDropdown: fallback sama -- kalau baris Excel tidak punya kolom
+  // "Tahun" yang bisa dibaca (mis. file lama sebelum fitur Tahun ada),
+  // pakai tahun yang sedang aktif di dropdown slicer (asalkan bukan
+  // "Semua Tahun").
+  const tahunDropdown = tahunAnomaliAktif();
 
   try {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
 
-    // key `${jenis}|${kabId}` -> array baris siap insert (no_urut belum diisi)
+    // key `${jenis}|${kabId}|${tahun}` -> array baris siap insert (no_urut belum diisi)
     const grupBaris = new Map();
     const sheetTakDikenali = [];
     let dilewatiTanpaKab = 0;
+    let dilewatiTanpaTahun = 0;
 
     for (const sheetName of wb.SheetNames) {
       const kunci = sheetName.trim().toLowerCase();
@@ -3345,13 +3390,20 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
         const kabId = kabDariKolom || (kabDropdown !== "semua" ? kabDropdown : null);
         if (!kabId) { dilewatiTanpaKab++; continue; }
 
+        // Tahun baris ini: UTAMAKAN kolom "Tahun" di file (sama alasannya
+        // dgn Kabupaten/Kota di atas) -- fallback ke dropdown Tahun yang
+        // sedang aktif (asalkan bukan "Semua Tahun").
+        const tahunRaw = Number(row["Tahun"] ?? row.tahun ?? "");
+        const tahunBaris = Number.isFinite(tahunRaw) && tahunRaw >= TAHUN_AWAL ? tahunRaw : tahunDropdown;
+        if (!tahunBaris) { dilewatiTanpaTahun++; continue; }
+
         const baris = {
-          jenis, kab_id: kabId,
+          jenis, kab_id: kabId, tahun: tahunBaris,
           kecamatan, bulan: bulanVal, nama_komoditi: namaKomoditi,
           kalimat_anomali: kalimatAnomali, tindak_lanjut: tindakVal,
           sumber: "M",
         };
-        const key = `${jenis}|${kabId}`;
+        const key = `${jenis}|${kabId}|${tahunBaris}`;
         if (!grupBaris.has(key)) grupBaris.set(key, []);
         grupBaris.get(key).push(baris);
       }
@@ -3367,22 +3419,29 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
           `(kolom "Kabupaten/Kota" kosong/tidak dikenali, dan dropdown Wilayah sedang "Semua Kabupaten/Kota"). ` +
           `Pilih kabupaten spesifik di dropdown Wilayah dulu, atau pastikan kolom "Kabupaten/Kota" terisi benar.`;
       }
+      if (dilewatiTanpaTahun > 0) {
+        pesan += `\n\n${dilewatiTanpaTahun} baris dilewati karena tahunnya tidak diketahui ` +
+          `(kolom "Tahun" kosong, dan dropdown Tahun sedang "Semua Tahun"). ` +
+          `Pilih tahun spesifik di dropdown Tahun dulu, atau pastikan kolom "Tahun" terisi benar.`;
+      }
       alert(pesan);
       return;
     }
 
     // No urut baris baru disambung dari JUMLAH BARIS YANG SUDAH ADA di
-    // database utk tiap kombinasi jenis+kab (bukan asal pakai kolom "No"
-    // di Excel -- itu rawan bentrok/duplikat sama baris yang sudah ada).
-    // Dikelompokkan per jenis+kab (bukan per jenis saja) karena satu
-    // file sekarang bisa berisi baris dari BEBERAPA kabupaten sekaligus.
+    // database utk tiap kombinasi jenis+kab+tahun (bukan asal pakai kolom
+    // "No" di Excel -- itu rawan bentrok/duplikat sama baris yang sudah
+    // ada). Dikelompokkan per jenis+kab+tahun (bukan per jenis saja)
+    // karena satu file sekarang bisa berisi baris dari BEBERAPA
+    // kabupaten/tahun sekaligus.
     let semuaBaris = [];
     const ringkasan = [];
     for (const [key, daftarBaris] of grupBaris.entries()) {
-      const [jenis, kabIdGrup] = key.split("|");
+      const [jenis, kabIdGrup, tahunGrupStr] = key.split("|");
+      const tahunGrup = Number(tahunGrupStr);
       const rowsSaatIni = await fetchAllRows((from, to) =>
         supabase.from("konfirmasi_anomali").select("id")
-          .eq("jenis", jenis).eq("kab_id", kabIdGrup)
+          .eq("jenis", jenis).eq("kab_id", kabIdGrup).eq("tahun", tahunGrup)
           .range(from, to)
       );
       let noUrut = rowsSaatIni?.length || 0;
@@ -3392,19 +3451,19 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
       });
       semuaBaris = semuaBaris.concat(daftar);
       const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabIdGrup);
-      ringkasan.push(`${SPH_CONFIG[jenis].label} · ${kabEntry ? kabEntry.nama : kabIdGrup}: ${daftar.length} baris`);
+      ringkasan.push(`${SPH_CONFIG[jenis].label} · ${kabEntry ? kabEntry.nama : kabIdGrup} · ${tahunGrup}: ${daftar.length} baris`);
     }
 
     const { error } = await supabase.from("konfirmasi_anomali").insert(semuaBaris);
     if (error) throw error;
 
-    let pesan = `✓ Berhasil menambah ${semuaBaris.length} baris anomali.\n${ringkasan.join("\n")}`;
-    if (sheetTakDikenali.length > 0) {
-      pesan += `\n\nTab dilewati (nama tidak dikenali sbg Jenis SPH): ${sheetTakDikenali.join(", ")}`;
-    }
-    if (dilewatiTanpaKab > 0) {
-      pesan += `\n\n${dilewatiTanpaKab} baris dilewati karena kabupatennya tidak diketahui.`;
-    }
+    // Pesan singkat -- rincian per kab/jenis/tahun dicatat di console
+    // saja (F12) supaya alert tidak kepanjangan.
+    console.log("Upload Anomali:", ringkasan.join(" | "));
+    let pesan = `✓ Berhasil menambah ${semuaBaris.length} baris anomali.`;
+    if (sheetTakDikenali.length > 0) pesan += ` (${sheetTakDikenali.length} tab dilewati, nama tak dikenali.)`;
+    if (dilewatiTanpaKab > 0) pesan += ` (${dilewatiTanpaKab} baris dilewati, kab tak diketahui.)`;
+    if (dilewatiTanpaTahun > 0) pesan += ` (${dilewatiTanpaTahun} baris dilewati, tahun tak diketahui.)`;
     alert(pesan);
 
     await muatAnomali();
@@ -3427,15 +3486,15 @@ $("btn-download-anomali-kabkot")?.addEventListener("click", downloadAnomaliExcel
 // file ini utk mengisi "Konfirmasi Kabkot" (lihat uploadKonfirmasiKabkot()).
 // JANGAN diubah/dihapus user, dan JANGAN dipakai utk baris baru yang
 // ditambah manual di Excel (baris tanpa ID otomatis dilewati saat upload).
-const ANOMALI_HEADERS = ["ID", "No", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval Provinsi"];
-const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
+const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval Provinsi"];
+const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
 
 // Helper: tulis 1 sheet Anomali dari array rows (dipakai baik utk
 // download per-kab-semua-SPH maupun backup-semua-data-global).
 function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
   const ws = {};
   const headers = [...ANOMALI_HEADERS];
-  headers[4] = labelKolomPeriodeAnomali(jenis); // "Bulan" (SBS) atau "Triwulan" (BST/TBF/TH)
+  headers[5] = labelKolomPeriodeAnomali(jenis); // "Bulan" (SBS) atau "Triwulan" (BST/TBF/TH)
   const range = { s: { r: 0, c: 0 }, e: { r: rows.length, c: headers.length - 1 } };
   const setCell = (r, c, cell) => { ws[XLSX.utils.encode_cell({ r, c })] = cell; };
 
@@ -3448,11 +3507,11 @@ function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
     const kabEntryRow = DAFTAR_KAB_BABEL.find((k) => k.id === r.kab_id);
     const labelKabRow = kabEntryRow ? kabEntryRow.nama : (r.kab_id || "");
     const vals = [
-      r.id, r.no_urut, labelKabRow, r.kecamatan || "", bulanLabel, r.nama_komoditi, r.kalimat_anomali,
+      r.id, r.no_urut, r.tahun ?? "", labelKabRow, r.kecamatan || "", bulanLabel, r.nama_komoditi, r.kalimat_anomali,
       labelTindak(r.tindak_lanjut), r.konfirmasi_kabkot,
       r.approval_provinsi === "ya" ? "Ya" : r.approval_provinsi === "tidak" ? "Tidak" : "",
     ];
-    vals.forEach((v, c) => setCell(i + 1, c, xlCell(v, { align: c <= 1 ? "center" : "left", bgColor: stripeBg })));
+    vals.forEach((v, c) => setCell(i + 1, c, xlCell(v, { align: c <= 2 ? "center" : "left", bgColor: stripeBg })));
   });
 
   ws["!ref"] = XLSX.utils.encode_range(range);
@@ -3465,7 +3524,9 @@ function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
 async function downloadAnomaliExcel() {
   const kabId = $("sel-kab-anomali").value;
   const modeSemua = kabId === "semua";
+  const tahunAktif = tahunAnomaliAktif(); // null = semua tahun ikut terdownload
   const kabList = modeSemua ? KAB_ANOMALI_LIST : [kabId];
+  const labelTahunFile = tahunAktif === null ? "SemuaTahun" : String(tahunAktif);
   const labelKabFile = modeSemua ? "SemuaKab" : (DAFTAR_KAB_BABEL.find((k) => k.id === kabId)?.nama || kabId).replace(/\s+/g, "");
 
   const wb = XLSX.utils.book_new();
@@ -3474,11 +3535,11 @@ async function downloadAnomaliExcel() {
   try {
     for (const kab of kabList) {
       for (const jenis of JENIS_LIST_DASHBOARD) {
-        const rows = await fetchAllRows((from, to) =>
-          supabase.from("konfirmasi_anomali").select("*")
-            .eq("jenis", jenis).eq("kab_id", kab)
-            .order("no_urut", { ascending: true }).range(from, to)
-        );
+        const rows = await fetchAllRows((from, to) => {
+          let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kab);
+          if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+          return q.order("no_urut", { ascending: true }).range(from, to);
+        });
         if (!rows || rows.length === 0) continue;
         adaData = true;
         // Mode semua: nama sheet "SPH-SBS_Kab. Bangka" dst agar tiap kab+jenis beda tab
@@ -3500,7 +3561,7 @@ async function downloadAnomaliExcel() {
     return false;
   }
 
-  XLSX.writeFile(wb, `KonfirmasiAnomali_${labelKabFile}.xlsx`, { cellStyles: true });
+  XLSX.writeFile(wb, `KonfirmasiAnomali_${labelKabFile}_${labelTahunFile}.xlsx`, { cellStyles: true });
   return true;
 }
 
@@ -3670,6 +3731,7 @@ async function bukaDashboardAnomali() {
 
   // Provinsi: lihat semua kab. Kabkot: cuma kabupatennya sendiri.
   const kabList = isProv() ? KAB_ANOMALI_LIST : [state.profile.kab_id];
+  const tahunAktif = tahunAnomaliAktif(); // null = semua tahun ikut dashboard
 
   let rows;
   try {
@@ -3678,6 +3740,7 @@ async function bukaDashboardAnomali() {
         .from("konfirmasi_anomali")
         .select("jenis, kab_id, konfirmasi_kabkot, approval_provinsi");
       if (!isProv()) q = q.eq("kab_id", state.profile.kab_id);
+      if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
       return q.range(from, to);
     });
   } catch (e) {
@@ -3687,7 +3750,7 @@ async function bukaDashboardAnomali() {
 
   state.dashboardAnomaliAktif = true;
   perbaruiTombolDashboardAnomali();
-  renderDashboardAnomali(rows, kabList);
+  renderDashboardAnomali(rows, kabList, tahunAktif);
 }
 
 // Format "count (pct%)" -- ditulis SATU BARIS (persen di dalam kurung
@@ -3700,7 +3763,7 @@ function fmtCountPct(count, total) {
   return `${count}<span class="pct" style="${warna}">(${pctVal}%)</span>`;
 }
 
-function renderDashboardAnomali(rows, kabList) {
+function renderDashboardAnomali(rows, kabList, tahunAktif) {
   const area = $("anomali-area");
 
   const map = new Map(); // key `${kab}|${jenis}` -> stats
@@ -3807,7 +3870,7 @@ function renderDashboardAnomali(rows, kabList) {
 
   const headerDashboard = `
     <div class="dashboard-anomali-header">
-      <h3>📊 Dashboard Anomali — Semua Jenis SPH</h3>
+      <h3>📊 Dashboard Anomali — Semua Jenis SPH ${tahunAktif !== null ? `— Tahun ${tahunAktif}` : "— Semua Tahun"}</h3>
     </div>`;
 
   if (bodyRows === "") {

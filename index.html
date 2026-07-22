@@ -183,6 +183,10 @@
         <div id="view-anomali" class="hidden">
           <div class="rekon-slicer">
             <div class="field">
+              <label>Tahun</label>
+              <select id="sel-tahun-anomali"></select>
+            </div>
+            <div class="field">
               <label>Jenis SPH</label>
               <select id="sel-jenis-anomali">
                 <option value="sbs">SPH-SBS</option>
@@ -243,15 +247,11 @@
               </div>
               <p class="modal-teks">
                 Akan memindai <strong>SEMUA jenis SPH (SBS, BST, TBF, TH)</strong> untuk
-                <strong id="txt-kab-generate"></strong> pada tahun yang dipilih, lalu otomatis
-                menambahkan baris anomali dari nilai provitas yang terdeteksi outlier (nilai kuning
-                di tabel Rekonsiliasi). Baris yang sudah ada (jenis + kecamatan + komoditi + periode
-                sama) tidak akan diduplikasi.
+                <strong id="txt-kab-generate"></strong> pada tahun <strong id="txt-tahun-generate"></strong>
+                (sesuai dropdown Tahun di atas), lalu otomatis menambahkan baris anomali dari nilai
+                provitas yang terdeteksi outlier (nilai kuning di tabel Rekonsiliasi). Baris yang
+                sudah ada (jenis + kecamatan + komoditi + periode sama) tidak akan diduplikasi.
               </p>
-              <div class="field">
-                <label>Tahun</label>
-                <select id="sel-tahun-generate-anomali"></select>
-              </div>
               <button class="btn-login" id="btn-generate-anomali">⚡ Generate Anomali</button>
               <div class="toolbar-status" id="log-generate-anomali"></div>
             </div>
