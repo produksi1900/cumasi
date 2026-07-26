@@ -2739,7 +2739,7 @@ function renderAnomali(rows) {
 
     const tdApproval = document.createElement("td");
     tdApproval.classList.add("col-approval");
-    if (prov) {
+    if (provFull) {
       const sel = document.createElement("select");
       sel.className = "sel-approval approval-" + (r.approval_provinsi || "kosong");
       sel.innerHTML = `
