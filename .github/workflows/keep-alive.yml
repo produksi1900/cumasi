@@ -1,16 +1,37 @@
-name: Supabase Keep Alive
+name: Supabase Keep Alive CUMASI
 
 on:
   schedule:
     - cron: "0 2 */3 * *"   # tiap 3 hari, jam 02:00 UTC (09:00 WIB)
   workflow_dispatch:         # bisa dijalankan manual dari tab Actions
 
+permissions:
+  contents: write            # dibutuhkan untuk commit otomatis (keep repo aktif)
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase
+      - name: Ping Supabase CUMASI
         run: |
-          curl -sf "https://urmqvzbyqfzlgcsuuokw.supabase.co/rest/v1/sync_meta?select=jenis&limit=1" \
-            -H "apikey: sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI" \
-            -H "Authorization: Bearer sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI"
+          curl -sf "https://urmqvzbyqfzlgcsuuokw.supabase.co/rest/v1/data_sbs?select=tahun&limit=1" \
+            -H "apikey: sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI"
+
+  keep-repo-active:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Commit kosong jika repo sepi lebih dari 45 hari
+        run: |
+          LAST=$(git log -1 --format=%ct)
+          NOW=$(date +%s)
+          DAYS=$(( (NOW - LAST) / 86400 ))
+          echo "Commit terakhir $DAYS hari lalu"
+          if [ "$DAYS" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep repo active (otomatis)"
+            git push
+          fi
