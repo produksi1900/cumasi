@@ -2,7 +2,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_KEY, EMAIL_DOMAIN } from "./config.js";
 import { SPH_CONFIG, DAFTAR_KAB_BABEL } from "./sph-config.js";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Sesi login disimpan di sessionStorage (per TAB), bukan localStorage
+// (default, dipakai bersama semua tab). Jadi tiap tab bisa login dengan
+// akun berbeda dan tidak saling menimpa saat di-refresh.
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    storage: window.sessionStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
 
 // ============================================================
 // State global
@@ -361,7 +370,7 @@ async function login() {
 }
 
 $("btn-logout").addEventListener("click", async () => {
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: "local" }); // keluar di tab ini saja
   keluarDariApp();
 });
 
@@ -1732,12 +1741,38 @@ $("btn-download-rangkuman").addEventListener("click", downloadRangkumanExcel);
 $("sel-jenis-anomali").addEventListener("change", muatAnomali);
 $("sel-kab-anomali").addEventListener("change", muatAnomali);
 $("sel-tahun-anomali").addEventListener("change", muatAnomali);
+$("sel-triwulan-anomali").addEventListener("change", muatAnomali);
 
 // Nilai tahun aktif dari dropdown slicer: angka (mis. 2026), atau null
 // kalau user memilih "— Semua Tahun —" (value "semua").
 function tahunAnomaliAktif() {
   const v = $("sel-tahun-anomali").value;
   return v === "semua" || v === "" ? null : Number(v);
+}
+
+// Nilai triwulan aktif dari dropdown slicer: 1-4, atau null kalau
+// "— Semua Triwulan —" (value "semua").
+function triwulanAnomaliAktif() {
+  const v = $("sel-triwulan-anomali").value;
+  return v === "semua" || v === "" ? null : Number(v);
+}
+
+// Terapkan filter triwulan ke query konfirmasi_anomali utk 1 jenis SPH.
+// Kolom "bulan" di tabel ini berisi 1-12 utk SBS (jadi TW n = bulan
+// (n-1)*3+1 s.d. n*3), dan 1-4 utk BST/TBF/TH (langsung = triwulan).
+function terapkanFilterTriwulan(q, jenis) {
+  const tw = triwulanAnomaliAktif();
+  if (tw === null) return q;
+  if (jenis === "sbs") return q.gte("bulan", (tw - 1) * 3 + 1).lte("bulan", tw * 3);
+  return q.eq("bulan", tw);
+}
+
+// Versi utk query yang mencampur SEMUA jenis SPH sekaligus (Dashboard).
+function terapkanFilterTriwulanSemuaJenis(q) {
+  const tw = triwulanAnomaliAktif();
+  if (tw === null) return q;
+  const b1 = (tw - 1) * 3 + 1, b2 = tw * 3;
+  return q.or(`and(jenis.eq.sbs,bulan.gte.${b1},bulan.lte.${b2}),and(jenis.neq.sbs,bulan.eq.${tw})`);
 }
 
 function isProv() { return state.profile?.role === "prov"; }
@@ -1919,6 +1954,7 @@ async function muatAnomali() {
           fetchAllRows((from, to) => {
             let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kab);
             if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+            q = terapkanFilterTriwulan(q, jenis);
             return q.order("no_urut", { ascending: true }).range(from, to);
           })
         )
@@ -1928,6 +1964,7 @@ async function muatAnomali() {
       rows = await fetchAllRows((from, to) => {
         let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kabId);
         if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+        q = terapkanFilterTriwulan(q, jenis);
         return q.order("no_urut", { ascending: true }).range(from, to);
       });
     }
@@ -2081,8 +2118,10 @@ function nilaiKolomDariBarisAnomali(tr, kolom) {
       const idx = daftarPeriodeAnomali(jenisAktif).indexOf(txt);
       return idx >= 0 ? idx + 1 : null;
     }
-    case "kalimat_anomali":
-      return (tds[3 + offset]?.textContent || "").trim();
+    case "kalimat_anomali": {
+      const teksEl = tds[3 + offset]?.querySelector(".kalimat-teks");
+      return (teksEl ? teksEl.textContent : tds[3 + offset]?.textContent || "").trim();
+    }
     case "tindak_lanjut": {
       const sel = tds[4 + offset]?.querySelector("select");
       return (sel ? sel.value : tds[4 + offset]?.textContent || "").trim();
@@ -2728,7 +2767,7 @@ function renderAnomali(rows) {
     const tdBulan = buatTdBulan(r.id, r.bulan, prov, jenisAktif);
     tdBulan.classList.add("td-bulan", "col-bulan");
 
-    const tdKalimat = editableTd(r.kalimat_anomali ?? "", "kalimat_anomali", prov, false);
+    const tdKalimat = buatTdKalimat(r, prov);
     tdKalimat.classList.add("col-anomali");
 
     const tdTindakLanjut = buatTdTindakLanjut(r.id, r.tindak_lanjut ?? "", !prov);
@@ -2813,6 +2852,82 @@ function renderAnomali(rows) {
 }
 // (catatan: thead & tbody sengaja dirakit terpisah di atas -- thead pakai
 // header sortable dgn event click, tbody isi baris data seperti biasa)
+
+// ---- Sel "Anomali": teks kalimat (bisa diedit utk prov) + tombol "i"
+// (kalau baris ini punya rentang_wajar) yang memunculkan popup kecil di
+// sebelahnya berisi rentang wajar. Teks sengaja ada di <div> sendiri
+// (bukan di <td>) supaya teks tombol "i" tidak ikut tersimpan saat
+// kalimat diedit. ----
+(function pasangStyleInfoRentang() {
+  const st = document.createElement("style");
+  st.textContent = `
+    .kalimat-teks { display: inline; }
+    .kalimat-teks[contenteditable="true"] { cursor: text; }
+    .kalimat-teks[contenteditable="true"]:focus { outline: 2px solid var(--hijau-muda); outline-offset: 2px; background: #eafaf1; }
+    .info-rentang-wrap { position: relative; display: inline-block; margin-left: 6px; vertical-align: middle; }
+    .btn-info-rentang {
+      width: 18px; height: 18px; padding: 0; border-radius: 50%;
+      border: 1px solid var(--hijau-muda); background: #fff; color: var(--hijau-tua);
+      font: italic bold 12px Georgia, serif; line-height: 1; cursor: pointer;
+    }
+    .btn-info-rentang:hover { background: #eafaf1; }
+    .popup-rentang {
+      position: absolute; left: 24px; top: -4px; z-index: 60;
+      background: #fff; border: 1px solid #ccc; border-radius: 6px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+      padding: 6px 10px; font-size: 12px; line-height: 1.4;
+      white-space: nowrap; color: var(--teks-gelap);
+    }
+    .popup-rentang strong { color: var(--hijau-tua); }
+  `;
+  document.head.appendChild(st);
+  // Klik di luar tombol "i" -> tutup popup yang sedang terbuka
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".info-rentang-wrap")) return;
+    document.querySelectorAll(".popup-rentang").forEach((p) => p.remove());
+  });
+})();
+
+function buatTdKalimat(r, editable) {
+  const td = document.createElement("td");
+  const teks = document.createElement("div");
+  teks.className = "kalimat-teks";
+  teks.textContent = r.kalimat_anomali ?? "";
+  if (editable) {
+    teks.contentEditable = "true";
+    teks.spellcheck = false;
+    teks.addEventListener("blur", async () => {
+      await simpanKolomAnomali(r.id, "kalimat_anomali", teks.textContent.trim());
+    });
+  } else {
+    td.classList.add("terkunci");
+  }
+  td.appendChild(teks);
+
+  if (r.rentang_wajar) {
+    const wrap = document.createElement("span");
+    wrap.className = "info-rentang-wrap";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-info-rentang";
+    btn.textContent = "i";
+    btn.title = "Lihat rentang wajar";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const ada = wrap.querySelector(".popup-rentang");
+      document.querySelectorAll(".popup-rentang").forEach((p) => p.remove());
+      if (ada) return; // klik lagi = tutup
+      const pop = document.createElement("div");
+      pop.className = "popup-rentang";
+      pop.innerHTML = `Rentang wajar: <strong></strong>`;
+      pop.querySelector("strong").textContent = r.rentang_wajar;
+      wrap.appendChild(pop);
+    });
+    wrap.appendChild(btn);
+    td.appendChild(wrap);
+  }
+  return td;
+}
 
 function editableTd(value, field, editable, isNumber) {
   const td = document.createElement("td");
@@ -3208,9 +3323,11 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
           kecamatan: namaKec,
           nama_komoditi: komoditi,
           bulan: per,
+          // Rentang wajar TIDAK ditulis di kalimat anomali, tapi disimpan
+          // di kolom rentang_wajar -> tampil lewat tombol "i" di tabel.
           kalimat_anomali:
-            `Nilai ${tabUtama.label} sebesar ${fmt(v, 2)} ${tabUtama.satuan} terdeteksi di luar ` +
-            `rentang wajar (${fmt(lo, 2)} s.d. ${fmt(hi, 2)} ${tabUtama.satuan}).`,
+            `Nilai ${tabUtama.label} sebesar ${fmt(v, 2)} ${tabUtama.satuan} terdeteksi di luar rentang wajar.`,
+          rentang_wajar: `${fmt(lo, 2)} s.d. ${fmt(hi, 2)} ${tabUtama.satuan}`,
           tindak_lanjut: "",
           sumber: "G",
         });
@@ -3532,8 +3649,10 @@ async function downloadAnomaliExcel() {
   const kabId = $("sel-kab-anomali").value;
   const modeSemua = kabId === "semua";
   const tahunAktif = tahunAnomaliAktif(); // null = semua tahun ikut terdownload
+  const twAktif = triwulanAnomaliAktif(); // null = semua triwulan ikut terdownload
   const kabList = modeSemua ? KAB_ANOMALI_LIST : [kabId];
   const labelTahunFile = tahunAktif === null ? "SemuaTahun" : String(tahunAktif);
+  const labelTwFile = twAktif === null ? "" : `_TW${twAktif}`;
   const labelKabFile = modeSemua ? "SemuaKab" : (DAFTAR_KAB_BABEL.find((k) => k.id === kabId)?.nama || kabId).replace(/\s+/g, "");
 
   const wb = XLSX.utils.book_new();
@@ -3545,6 +3664,7 @@ async function downloadAnomaliExcel() {
         const rows = await fetchAllRows((from, to) => {
           let q = supabase.from("konfirmasi_anomali").select("*").eq("jenis", jenis).eq("kab_id", kab);
           if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+          q = terapkanFilterTriwulan(q, jenis);
           return q.order("no_urut", { ascending: true }).range(from, to);
         });
         if (!rows || rows.length === 0) continue;
@@ -3568,7 +3688,7 @@ async function downloadAnomaliExcel() {
     return false;
   }
 
-  XLSX.writeFile(wb, `KonfirmasiAnomali_${labelKabFile}_${labelTahunFile}.xlsx`, { cellStyles: true });
+  XLSX.writeFile(wb, `KonfirmasiAnomali_${labelKabFile}_${labelTahunFile}${labelTwFile}.xlsx`, { cellStyles: true });
   return true;
 }
 
@@ -3748,6 +3868,7 @@ async function bukaDashboardAnomali() {
         .select("jenis, kab_id, konfirmasi_kabkot, approval_provinsi");
       if (!isProv()) q = q.eq("kab_id", state.profile.kab_id);
       if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
+      q = terapkanFilterTriwulanSemuaJenis(q);
       return q.range(from, to);
     });
   } catch (e) {
@@ -3757,7 +3878,7 @@ async function bukaDashboardAnomali() {
 
   state.dashboardAnomaliAktif = true;
   perbaruiTombolDashboardAnomali();
-  renderDashboardAnomali(rows, kabList, tahunAktif);
+  renderDashboardAnomali(rows, kabList, tahunAktif, triwulanAnomaliAktif());
 }
 
 // Format "count (pct%)" -- ditulis SATU BARIS (persen di dalam kurung
@@ -3770,7 +3891,7 @@ function fmtCountPct(count, total) {
   return `${count}<span class="pct" style="${warna}">(${pctVal}%)</span>`;
 }
 
-function renderDashboardAnomali(rows, kabList, tahunAktif) {
+function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
   const area = $("anomali-area");
 
   const map = new Map(); // key `${kab}|${jenis}` -> stats
@@ -3875,9 +3996,11 @@ function renderDashboardAnomali(rows, kabList, tahunAktif) {
     }
   }
 
+  const labelTahunDash = tahunAktif !== null ? `— Tahun ${tahunAktif}` : "— Semua Tahun";
+  const labelTwDash = twAktif ? ` — Triwulan ${twAktif}` : "";
   const headerDashboard = `
     <div class="dashboard-anomali-header">
-      <h3>📊 Dashboard Anomali — Semua Jenis SPH ${tahunAktif !== null ? `— Tahun ${tahunAktif}` : "— Semua Tahun"}</h3>
+      <h3>📊 Dashboard Anomali — Semua Jenis SPH ${labelTahunDash}${labelTwDash}</h3>
     </div>`;
 
   if (bodyRows === "") {
