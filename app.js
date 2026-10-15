@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_KEY, EMAIL_DOMAIN } from "./config.js";
-import { SPH_CONFIG, DAFTAR_KAB_BABEL } from "./sph-config.js";
+import { SPH_CONFIG, DAFTAR_KAB_BABEL, VARIABEL_RANGKUMAN } from "./sph-config.js";
 
 // Sesi login disimpan di sessionStorage (per TAB), bukan localStorage
 // (default, dipakai bersama semua tab). Jadi tiap tab bisa login dengan
@@ -292,6 +292,10 @@ async function masukKeApp() {
       DAFTAR_KAB_BABEL.map((k) => `<option value="${k.id}">${k.nama}</option>`).join("");
   }
 
+  isiVariabelRangkuman();
+  await isiKecamatanRangkuman();
+  $("rangkuman-area").innerHTML = `<div class="placeholder-kosong">Pilih filter lalu klik OK untuk menampilkan tabulasi.</div>`;
+
   isiPilihanTahunAnomali($("sel-tahun-anomali"));
   siapkanSlicerAnomali();
 
@@ -302,10 +306,6 @@ async function masukKeApp() {
 
   mulaiRotasiInfo();
 
-  // Kalau lagi buka view Rangkuman (mis. sisa state sebelumnya), muat juga
-  if (!$("view-rangkuman").classList.contains("hidden")) {
-    await muatRangkuman();
-  }
 }
 
 function keluarDariApp() {
@@ -332,7 +332,7 @@ function keluarDariApp() {
 
   // Reset panel kanan balik ke view Rekonsiliasi
   gantiView("rekon");
-  $("rangkuman-area").innerHTML = `<div class="placeholder-kosong">Pilih jenis SPH, tahun & kabupaten untuk mulai.</div>`;
+  $("rangkuman-area").innerHTML = `<div class="placeholder-kosong">Pilih filter lalu klik OK untuk menampilkan tabulasi.</div>`;
   $("anomali-area").innerHTML = `<div class="placeholder-kosong">Pilih jenis SPH & kabupaten untuk mulai.</div>`;
 }
 
@@ -386,7 +386,6 @@ function gantiView(view) {
   $("btn-view-anomali").classList.toggle("aktif", view === "anomali");
   $("btn-view-rangkuman").classList.toggle("aktif", view === "rangkuman");
   $("toggle-aksi-rekon").classList.toggle("hidden", view !== "rekon");
-  if (view === "rangkuman" && state.profile) muatRangkuman();
   if (view === "anomali" && state.profile) muatAnomali();
 }
 $("btn-view-rekon").addEventListener("click", () => gantiView("rekon"));
@@ -1203,114 +1202,167 @@ const BULAN_NAMA = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-$("sel-jenis-rangkuman").addEventListener("change", muatRangkuman);
-$("sel-tahun-rangkuman").addEventListener("change", muatRangkuman);
-$("sel-kab-rangkuman").addEventListener("change", muatRangkuman);
+function isiVariabelRangkuman() {
+  const jenis = $("sel-jenis-rangkuman").value;
+  $("sel-variabel-rangkuman").innerHTML = VARIABEL_RANGKUMAN[jenis]
+    .map((v) => `<option value="${v.key}">${v.label}</option>`).join("");
+}
+function varRangkumanAktif(jenis) {
+  const daftar = VARIABEL_RANGKUMAN[jenis];
+  return daftar.find((v) => v.key === $("sel-variabel-rangkuman").value) || daftar[0];
+}
+async function isiKecamatanRangkuman() {
+  const sel = $("sel-kec-rangkuman");
+  const kab = $("sel-kab-rangkuman").value;
+  sel.innerHTML = `<option value="semua">— Semua Kecamatan —</option>`;
+  if (!kab || kab === "semua") { sel.disabled = true; return; }
+  sel.disabled = true;
+  try {
+    const list = await muatKecamatanKab(kab);
+    sel.innerHTML += list.map((n) => `<option value="${n.replace(/"/g, "&quot;")}">${n}</option>`).join("");
+  } catch (e) { /* biarkan cuma "Semua Kecamatan" */ }
+  sel.disabled = false;
+}
+
+$("sel-jenis-rangkuman").addEventListener("change", isiVariabelRangkuman);
+$("sel-kab-rangkuman").addEventListener("change", isiKecamatanRangkuman);
+$("btn-ok-rangkuman").addEventListener("click", muatRangkuman);
+
+async function ambilRowsRangkuman(cfg, v, thn, kabPilihan, kecPilihan) {
+  const kolom = ["namatanaman", "idtanaman", "nama_kec", cfg.periodeCol, ...v.cols].join(", ");
+  let rows = await fetchAllRows((from, to) => {
+    let q = supabase.from(cfg.table).select(kolom).eq("tahun", thn);
+    if (kabPilihan !== "semua") q = q.eq("nama_kab", kabPilihan);
+    return q.range(from, to);
+  });
+  // Filter kecamatan di sisi client (ejaan nama_kec bisa beda antar tabel -> dicocokkan tanpa spasi/kapital)
+  if (kecPilihan && kecPilihan !== "semua") {
+    const k = keyKecamatan(kecPilihan);
+    rows = rows.filter((r) => keyKecamatan(r.nama_kec) === k);
+  }
+  return rows;
+}
 
 async function muatRangkuman() {
   if (!state.profile) return;
   const jenis = $("sel-jenis-rangkuman").value;
   const cfg = SPH_CONFIG[jenis];
-  const rc = cfg.rangkuman;
+  const v = varRangkumanAktif(jenis);
   const tahun = Number($("sel-tahun-rangkuman").value);
-  const kabPilihan = $("sel-kab-rangkuman").value; // "semua" atau nama_kab
+  const kabPilihan = $("sel-kab-rangkuman").value;
+  const kecPilihan = $("sel-kec-rangkuman").value;
   const area = $("rangkuman-area");
+  const btnOk = $("btn-ok-rangkuman");
 
-  if (!rc) {
-    area.innerHTML = `<div class="placeholder-kosong">Jenis SPH ini belum didukung untuk Rangkuman Data.</div>`;
-    return;
-  }
-
+  btnOk.disabled = true;
   mulaiLoadingDonut(area);
-
-  const ambilTahun = (thn) =>
-    fetchAllRows((from, to) => {
-      let q = supabase
-        .from(cfg.table)
-        .select(`namatanaman, idtanaman, ${cfg.periodeCol}, ${rc.produksiCol}`)
-        .eq("tahun", thn);
-      if (kabPilihan !== "semua") q = q.eq("nama_kab", kabPilihan);
-      return q.range(from, to);
-    });
-
-  let rowsIni = [], rowsLalu = [];
   try {
-    [rowsIni, rowsLalu] = await Promise.all([ambilTahun(tahun), ambilTahun(tahun - 1)]);
+    const [rowsIni, rowsLalu] = await Promise.all([
+      ambilRowsRangkuman(cfg, v, tahun, kabPilihan, kecPilihan),
+      ambilRowsRangkuman(cfg, v, tahun - 1, kabPilihan, kecPilihan),
+    ]);
+    renderRangkuman(cfg, v, rowsIni, rowsLalu, jenis, tahun, kabPilihan, kecPilihan);
   } catch (e) {
     area.innerHTML = `<div class="placeholder-kosong">Gagal memuat data: ${e.message}</div>`;
-    return;
+  } finally {
+    btnOk.disabled = false;
   }
-
-  renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan);
 }
 
-// Agregasi baris mentah -> Map<namatanaman, {idtanaman, bulan:{1..12}, tw:{1..4}}>
-function agregasiRangkuman(cfg, rc, rows) {
+function objRangkumanKosong() {
+  return {
+    idtanaman: "", bulan: {}, bulanS: {}, bulanN: {},
+    tw: { 1: 0, 2: 0, 3: 0, 4: 0 }, twS: { 1: 0, 2: 0, 3: 0, 4: 0 }, twN: { 1: 0, 2: 0, 3: 0, 4: 0 },
+  };
+}
+function nilaiVarRow(r, v) {
+  let s = 0;
+  for (const c of v.cols) s += Number(r[c]) || 0;
+  return s * (v.factor ?? 1);
+}
+
+// Agregasi baris mentah -> Map<namatanaman, obj>. Mode "avg" (harga):
+// rata-rata nilai non-nol; mode lain: dijumlah.
+function agregasiRangkuman(cfg, v, rows) {
   const map = new Map();
   for (const r of rows) {
     const nama = r.namatanaman;
     if (!nama) continue;
-    if (!map.has(nama)) map.set(nama, { idtanaman: r.idtanaman ?? "", bulan: {}, tw: { 1: 0, 2: 0, 3: 0, 4: 0 } });
-    const obj = map.get(nama);
-    if (!obj.idtanaman && r.idtanaman) obj.idtanaman = r.idtanaman;
+    if (!map.has(nama)) map.set(nama, objRangkumanKosong());
+    const o = map.get(nama);
+    if (!o.idtanaman && r.idtanaman) o.idtanaman = r.idtanaman;
 
-    const nilai = (Number(r[rc.produksiCol]) || 0) * (rc.factor ?? 1);
+    const nilai = nilaiVarRow(r, v);
+    if (v.mode === "avg" && nilai === 0) continue;
 
+    let b = null, tw = null;
     if (cfg.periodeCol === "bulan") {
-      const b = Number(r.bulan);
-      if (b >= 1 && b <= 12) {
-        obj.bulan[b] = (obj.bulan[b] || 0) + nilai;
-        const tw = Math.ceil(b / 3);
-        obj.tw[tw] = (obj.tw[tw] || 0) + nilai;
-      }
+      const bb = Number(r.bulan);
+      if (bb >= 1 && bb <= 12) { b = bb; tw = Math.ceil(bb / 3); }
     } else {
-      const tw = Number(r.triwulan);
-      if (tw >= 1 && tw <= 4) obj.tw[tw] = (obj.tw[tw] || 0) + nilai;
+      const t = Number(r.triwulan);
+      if (t >= 1 && t <= 4) tw = t;
     }
+    if (tw === null) continue;
+    if (b !== null) {
+      o.bulanS[b] = (o.bulanS[b] || 0) + nilai;
+      o.bulanN[b] = (o.bulanN[b] || 0) + 1;
+    }
+    o.twS[tw] += nilai;
+    o.twN[tw] += 1;
+  }
+  const avg = v.mode === "avg";
+  for (const o of map.values()) {
+    for (const b in o.bulanS) o.bulan[b] = avg ? o.bulanS[b] / o.bulanN[b] : o.bulanS[b];
+    for (let t = 1; t <= 4; t++) o.tw[t] = avg ? (o.twN[t] ? o.twS[t] / o.twN[t] : 0) : o.twS[t];
   }
   return map;
 }
 
-// Cari indeks triwulan terakhir (1-4) yang punya nilai != 0
 function twTerakhirAdaData(twObj) {
-  for (let t = 4; t >= 1; t--) {
-    if ((twObj[t] || 0) !== 0) return t;
-  }
+  for (let t = 4; t >= 1; t--) if ((twObj[t] || 0) !== 0) return t;
   return null;
 }
 
-// Hitung satu nilai growth (persen):
-//   - pembilang ada, penyebut ada  -> rumus normal
-//   - pembilang ada, penyebut = 0  -> +100 (naik dari nol)
-//   - pembilang = 0, penyebut ada  -> -100 (turun ke nol)
-//   - keduanya = 0                 -> null (tampil sebagai strip "-")
+// Hitung satu nilai growth (persen): 0/0 -> null ("-"), dasar 0 -> +100, tujuan 0 -> -100
 function hitungSatuGrowth(valNow, valBase) {
   if (valBase !== 0) return ((valNow - valBase) / valBase) * 100;
   if (valNow !== 0) return 100;
-  return null; // 0/0 -> strip
+  return null;
 }
 
-// q-to-q, y-on-y, dan c-to-c (kumulatif vs kumulatif tahun lalu) dalam persen
-function hitungGrowth(valNow, valPrevQ, valYoy, kumulIni, kumulLalu) {
-  const qtoq  = hitungSatuGrowth(valNow,   valPrevQ);
-  const yoy   = hitungSatuGrowth(valNow,   valYoy);
-  const ctoc  = hitungSatuGrowth(kumulIni, kumulLalu);
-  return { qtoq, yoy, ctoc };
-}
-
-function renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
-  const area = $("rangkuman-area");
-  const mapIni = agregasiRangkuman(cfg, rc, rowsIni);
-  const mapLalu = agregasiRangkuman(cfg, rc, rowsLalu);
-
-  if (mapIni.size === 0) {
-    area.innerHTML =
-      `<div class="placeholder-kosong">Tidak ada data ${cfg.label} tahun ${tahun}` +
-      `${kabPilihan === "semua" ? "" : " untuk " + kabPilihan}.</div>`;
-    return;
+// Nilai kumulatif s.d. triwulan "upto" sesuai mode variabel
+function kumulRangkuman(o, upto, mode) {
+  if (mode === "stok") return o.tw[upto] || 0;
+  if (mode === "avg") {
+    let s = 0, n = 0;
+    for (let t = 1; t <= upto; t++) { s += o.twS[t]; n += o.twN[t]; }
+    return n ? s / n : 0;
   }
+  let s = 0;
+  for (let t = 1; t <= upto; t++) s += o.tw[t] || 0;
+  return s;
+}
 
-  // Urutkan komoditi sesuai referensi id_tanaman (sama seperti dropdown Rekon)
+function hitungBarisRangkuman(v, d, dLalu) {
+  const twNow = twTerakhirAdaData(d.tw);
+  let jumlah = 0, qtoq = null, yoy = null, ctoc = null;
+  if (twNow !== null) {
+    jumlah = v.mode === "stok" ? (d.tw[twNow] || 0) : kumulRangkuman(d, 4, v.mode);
+    const valNow = d.tw[twNow] || 0;
+    const valPrevQ = twNow === 1 ? (dLalu.tw[4] || 0) : (d.tw[twNow - 1] || 0);
+    const valYoy = dLalu.tw[twNow] || 0;
+    qtoq = hitungSatuGrowth(valNow, valPrevQ);
+    yoy = hitungSatuGrowth(valNow, valYoy);
+    ctoc = hitungSatuGrowth(kumulRangkuman(d, twNow, v.mode), kumulRangkuman(dLalu, twNow, v.mode));
+  }
+  return { jumlah, qtoq, yoy, ctoc };
+}
+
+// Dipakai bersama oleh tampilan web & Excel
+function susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis) {
+  const mapIni = agregasiRangkuman(cfg, v, rowsIni);
+  const mapLalu = agregasiRangkuman(cfg, v, rowsLalu);
   const urutanMap = state.idTanamanUrutan[jenis] || {};
   const namaList = Array.from(mapIni.keys()).sort((a, b) => {
     const ua = urutanMap[normalisasiNamaTanaman(a)];
@@ -1321,95 +1373,70 @@ function renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
     return a.localeCompare(b, "id");
   });
 
-  const pakaiBulan = cfg.periodeCol === "bulan";
-  const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabPilihan);
-  const labelKab = kabPilihan === "semua" ? "Semua Kabupaten/Kota (Provinsi)" : (kabEntry ? kabEntry.nama : kabPilihan);
+  const totalBulan = {}; for (let b = 1; b <= 12; b++) totalBulan[b] = 0;
+  const totalTw = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  const totalTwLalu = { 1: 0, 2: 0, 3: 0, 4: 0 };
 
+  const baris = namaList.map((nama) => {
+    const d = mapIni.get(nama);
+    const dLalu = mapLalu.get(nama) || objRangkumanKosong();
+    const isGroup = isNamaGroup(nama); // "(Group)": tampil, tapi tidak ikut TOTAL
+    if (!isGroup) {
+      for (let b = 1; b <= 12; b++) totalBulan[b] += d.bulan[b] || 0;
+      for (let t = 1; t <= 4; t++) { totalTw[t] += d.tw[t] || 0; totalTwLalu[t] += dLalu.tw[t] || 0; }
+    }
+    return { nama, d, isGroup, hasil: hitungBarisRangkuman(v, d, dLalu) };
+  });
+
+  // Harga (rata-rata) tidak punya TOTAL
+  let total = null;
+  if (v.mode !== "avg") {
+    const dT = objRangkumanKosong(); dT.tw = totalTw; dT.bulan = totalBulan;
+    const dL = objRangkumanKosong(); dL.tw = totalTwLalu;
+    total = { d: dT, hasil: hitungBarisRangkuman(v, dT, dL) };
+  }
+  return { baris, total };
+}
+
+function labelJumlahRangkuman(v) {
+  return v.mode === "avg" ? "Rata-rata" : v.mode === "stok" ? "TW Terakhir" : "Jumlah";
+}
+function labelWilayahRangkuman(kabPilihan, kecPilihan) {
+  const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabPilihan);
+  let label = kabPilihan === "semua" ? "Semua Kabupaten/Kota (Provinsi)" : (kabEntry ? kabEntry.nama : kabPilihan);
+  if (kecPilihan && kecPilihan !== "semua") label += ` — Kec. ${kecPilihan}`;
+  return label;
+}
+
+function renderRangkuman(cfg, v, rowsIni, rowsLalu, jenis, tahun, kabPilihan, kecPilihan) {
+  const area = $("rangkuman-area");
+  const { baris, total } = susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis);
+  const labelWilayah = labelWilayahRangkuman(kabPilihan, kecPilihan);
+
+  if (baris.length === 0) {
+    area.innerHTML = `<div class="placeholder-kosong">Tidak ada data ${cfg.label} tahun ${tahun} untuk ${labelWilayah}.</div>`;
+    return;
+  }
+
+  const pakaiBulan = cfg.periodeCol === "bulan";
+  const dec = v.mode === "avg" ? 0 : 2;
   const BULAN_SINGKAT = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
   let kolomHead = `<th>Kode</th><th>Nama</th><th>Satuan</th>`;
   if (pakaiBulan) kolomHead += BULAN_SINGKAT.map((b) => `<th>${b}</th>`).join("");
-  kolomHead += `<th>TW 1</th><th>TW 2</th><th>TW 3</th><th>TW 4</th><th>Jumlah</th><th>q-to-q</th><th>y-on-y</th><th>c-to-c</th>`;
+  kolomHead += `<th>TW 1</th><th>TW 2</th><th>TW 3</th><th>TW 4</th><th>${labelJumlahRangkuman(v)}</th><th>q-to-q</th><th>y-on-y</th><th>c-to-c</th>`;
 
-  const totalBulan = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0 };
-  const totalTw = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  const totalTwLalu = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  let totalKumulIni = 0, totalKumulLalu = 0;
+  const buatBaris = (kode, nama, d, hasil, tebal) => {
+    const T = (x) => (tebal ? `<strong>${x}</strong>` : x);
+    let tds = `<td>${kode}</td><td class="nama">${T(nama)}</td><td>${tebal ? "" : v.satuan}</td>`;
+    if (pakaiBulan) for (let b = 1; b <= 12; b++) tds += `<td>${T(fmt(d.bulan[b] || 0, dec))}</td>`;
+    for (let t = 1; t <= 4; t++) tds += `<td>${T(fmt(d.tw[t] || 0, dec))}</td>`;
+    tds += `<td>${T(fmt(hasil.jumlah, dec))}</td>`;
+    tds += `<td>${fmtGrowthHtml(hasil.qtoq, tebal)}</td><td>${fmtGrowthHtml(hasil.yoy, tebal)}</td><td>${fmtGrowthHtml(hasil.ctoc, tebal)}</td>`;
+    return `<tr>${tds}</tr>`;
+  };
 
-  let bodyRows = "";
-  namaList.forEach((nama) => {
-    const d = mapIni.get(nama);
-    const dLalu = mapLalu.get(nama) || { tw: { 1: 0, 2: 0, 3: 0, 4: 0 }, bulan: {} };
-    const isGroup = isNamaGroup(nama); // baris "(Group)": tampil, tapi TIDAK ikut TOTAL
-
-    const jumlah = (d.tw[1] || 0) + (d.tw[2] || 0) + (d.tw[3] || 0) + (d.tw[4] || 0);
-    const jumlahLalu = (dLalu.tw[1] || 0) + (dLalu.tw[2] || 0) + (dLalu.tw[3] || 0) + (dLalu.tw[4] || 0);
-    const twNow = twTerakhirAdaData(d.tw);
-
-    // Kumulatif s.d. twNow (untuk c-to-c yang apple-to-apple)
-    let kumulIni = 0, kumulLalu = 0;
-    if (twNow !== null) {
-      for (let t = 1; t <= twNow; t++) {
-        kumulIni  += d.tw[t]    || 0;
-        kumulLalu += dLalu.tw[t] || 0;
-      }
-    }
-
-    let qtoq = null, yoy = null, ctoc = null;
-    if (twNow !== null) {
-      const valNow = d.tw[twNow] || 0;
-      const valPrevQ = twNow === 1 ? (dLalu.tw[4] || 0) : (d.tw[twNow - 1] || 0);
-      const valYoy = dLalu.tw[twNow] || 0;
-      ({ qtoq, yoy, ctoc } = hitungGrowth(valNow, valPrevQ, valYoy, kumulIni, kumulLalu));
-    }
-
-    let tds = `<td>${d.idtanaman || "-"}</td><td class="nama">${nama}</td><td>${rc.satuan}</td>`;
-    if (pakaiBulan) {
-      for (let b = 1; b <= 12; b++) {
-        const v = d.bulan[b] || 0;
-        tds += `<td>${fmt(v, 2)}</td>`;
-        if (!isGroup) totalBulan[b] += v;
-      }
-    }
-    for (let t = 1; t <= 4; t++) {
-      const v = d.tw[t] || 0;
-      tds += `<td>${fmt(v, 2)}</td>`;
-      if (!isGroup) totalTw[t] += v;
-    }
-    if (!isGroup) {
-      for (let t = 1; t <= 4; t++) totalTwLalu[t] += (dLalu.tw[t] || 0);
-      totalKumulIni  += kumulIni;
-      totalKumulLalu += kumulLalu;
-    }
-
-    tds += `<td>${fmt(jumlah, 2)}</td>`;
-    tds += `<td>${fmtGrowthHtml(qtoq)}</td>`;
-    tds += `<td>${fmtGrowthHtml(yoy)}</td>`;
-    tds += `<td>${fmtGrowthHtml(ctoc)}</td>`;
-
-    bodyRows += `<tr>${tds}</tr>`;
-  });
-
-  // ---- Baris TOTAL ----
-  const jumlahTotal = totalTw[1] + totalTw[2] + totalTw[3] + totalTw[4];
-  const twNowTotal = twTerakhirAdaData(totalTw);
-  let qtoqTotal = null, yoyTotal = null, ctocTotal = null;
-  if (twNowTotal !== null) {
-    const valNow = totalTw[twNowTotal];
-    const valPrevQ = twNowTotal === 1 ? totalTwLalu[4] : totalTw[twNowTotal - 1];
-    const valYoy = totalTwLalu[twNowTotal];
-    ({ qtoq: qtoqTotal, yoy: yoyTotal, ctoc: ctocTotal } =
-      hitungGrowth(valNow, valPrevQ, valYoy, totalKumulIni, totalKumulLalu));
-  }
-
-  let tdsTotal = `<td></td><td class="nama"><strong>TOTAL</strong></td><td></td>`;
-  if (pakaiBulan) {
-    for (let b = 1; b <= 12; b++) tdsTotal += `<td><strong>${fmt(totalBulan[b], 2)}</strong></td>`;
-  }
-  for (let t = 1; t <= 4; t++) tdsTotal += `<td><strong>${fmt(totalTw[t], 2)}</strong></td>`;
-  tdsTotal += `<td><strong>${fmt(jumlahTotal, 2)}</strong></td>`;
-  tdsTotal += `<td>${fmtGrowthHtml(qtoqTotal, true)}</td>`;
-  tdsTotal += `<td>${fmtGrowthHtml(yoyTotal, true)}</td>`;
-  tdsTotal += `<td>${fmtGrowthHtml(ctocTotal, true)}</td>`;
+  let bodyRows = baris.map((x) => buatBaris(x.d.idtanaman || "-", x.nama, x.d, x.hasil, false)).join("");
+  if (total) bodyRows += buatBaris("", "TOTAL", total.d, total.hasil, true);
 
   area.innerHTML = `
     <div class="tabel-blok">
@@ -1417,18 +1444,17 @@ function renderRangkuman(cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
       <div class="tabel-scroll">
         <div class="tabel-konten">
           <div class="tabel-judul">
-            <span>Rangkuman Produksi ${cfg.label} — ${labelKab} — Tahun ${tahun}</span>
-            <span class="satuan">Satuan: ${rc.satuan} · q-to-q, y-on-y &amp; c-to-c dalam %</span>
+            <span>Tabulasi ${v.label} ${cfg.label} — ${labelWilayah} — Tahun ${tahun}</span>
+            <span class="satuan">q-to-q, y-on-y &amp; c-to-c dalam %</span>
           </div>
           <table class="tabel-rekon tabel-rangkuman">
             <thead><tr>${kolomHead}</tr></thead>
-            <tbody>${bodyRows}<tr>${tdsTotal}</tr></tbody>
+            <tbody>${bodyRows}</tbody>
           </table>
         </div>
       </div>
     </div>
   `;
-
   initScrollAtas(area);
 }
 
@@ -1470,261 +1496,96 @@ function xlCell(v, opts = {}) {
   return cell;
 }
 
-// Hitung growth untuk satu komoditi/total, kembalikan {qtoq, yoy, ctoc}
-function hitungGrowthXl(d, dLalu) {
-  const twNow = twTerakhirAdaData(d.tw);
-  if (twNow === null) return { qtoq: null, yoy: null, ctoc: null };
-  const valNow   = d.tw[twNow] || 0;
-  const valPrevQ = twNow === 1 ? (dLalu.tw[4] || 0) : (d.tw[twNow - 1] || 0);
-  const valYoy   = dLalu.tw[twNow] || 0;
-  let kumulIni = 0, kumulLalu = 0;
-  for (let t = 1; t <= twNow; t++) { kumulIni += d.tw[t] || 0; kumulLalu += dLalu.tw[t] || 0; }
-  return hitungGrowth(valNow, valPrevQ, valYoy, kumulIni, kumulLalu);
-}
-
-// Tulis satu sheet rangkuman ke workbook
-function tulisSheetRangkuman(wb, sheetName, cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan) {
-  const mapIni  = agregasiRangkuman(cfg, rc, rowsIni);
-  const mapLalu = agregasiRangkuman(cfg, rc, rowsLalu);
-
-  const urutanMap = state.idTanamanUrutan[jenis] || {};
-  const namaList  = Array.from(mapIni.keys()).sort((a, b) => {
-    const ua = urutanMap[normalisasiNamaTanaman(a)];
-    const ub = urutanMap[normalisasiNamaTanaman(b)];
-    if (ua !== undefined && ub !== undefined) return ua - ub;
-    if (ua !== undefined) return -1;
-    if (ub !== undefined) return 1;
-    return a.localeCompare(b, "id");
-  });
-
+// Tulis 1 sheet tabulasi ke workbook
+function tulisSheetRangkuman(wb, sheetName, cfg, v, data, tahun, labelWilayah) {
   const pakaiBulan = cfg.periodeCol === "bulan";
-  const kabEntry   = DAFTAR_KAB_BABEL.find((k) => k.id === kabPilihan);
-  const labelKab   = kabPilihan === "semua"
-    ? "Semua Kabupaten/Kota (Provinsi)"
-    : (kabEntry ? kabEntry.nama : kabPilihan);
-
-  // Susun kolom header
   const BULAN_SINGKAT_XL = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
   const headers = ["Kode", "Nama", "Satuan"];
   if (pakaiBulan) BULAN_SINGKAT_XL.forEach((b) => headers.push(b));
-  headers.push("TW 1", "TW 2", "TW 3", "TW 4", "Jumlah", "q-to-q (%)", "y-on-y (%)", "c-to-c (%)");
+  headers.push("TW 1", "TW 2", "TW 3", "TW 4", labelJumlahRangkuman(v), "q-to-q (%)", "y-on-y (%)", "c-to-c (%)");
 
   const nCol = headers.length;
-  const ws   = {};
+  const ws = {};
   const range = { s: { r: 0, c: 0 }, e: { r: 0, c: nCol - 1 } };
-
   const setCell = (r, c, cell) => {
-    const addr = XLSX.utils.encode_cell({ r, c });
-    ws[addr] = cell;
+    ws[XLSX.utils.encode_cell({ r, c })] = cell;
     if (r > range.e.r) range.e.r = r;
     if (c > range.e.c) range.e.c = c;
   };
 
-  // ---- Baris 0: judul tabel ----
-  const judulTeks = `Rangkuman Produksi ${cfg.label} — ${labelKab} — Tahun ${tahun}  |  Satuan: ${rc.satuan} · q-to-q, y-on-y, c-to-c dalam %`;
+  const judulTeks = `Tabulasi ${v.label} ${cfg.label} — ${labelWilayah} — Tahun ${tahun}  |  q-to-q, y-on-y, c-to-c dalam %`;
   setCell(0, 0, xlCell(judulTeks, { bold: true, bgColor: XL_KUNING_JUDUL, align: "left" }));
   for (let c = 1; c < nCol; c++) setCell(0, c, xlCell("", { bgColor: XL_KUNING_JUDUL }));
   ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: nCol - 1 } }];
 
-  // ---- Baris 1: header kolom ----
   headers.forEach((h, c) => {
     setCell(1, c, xlCell(h, { bold: true, bgColor: XL_HIJAU_HEADER, color: XL_PUTIH, align: c <= 2 ? "left" : "center" }));
   });
 
-  // Indeks kolom growth (selalu 3 kolom terakhir)
-  const iJumlah = nCol - 4;
-  const iQtoQ   = nCol - 3;
-  const iYoy    = nCol - 2;
-  const iCtoc   = nCol - 1;
-
-  const totalBulan = {};
-  for (let b = 1; b <= 12; b++) totalBulan[b] = 0;
-  const totalTw   = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  const totalTwLalu = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  let totalKumulIni = 0, totalKumulLalu = 0;
-
-  let dataRow = 2;
-
-  namaList.forEach((nama, iBaris) => {
-    const d     = mapIni.get(nama);
-    const dLalu = mapLalu.get(nama) || { tw: { 1: 0, 2: 0, 3: 0, 4: 0 }, bulan: {} };
-    const { qtoq, yoy, ctoc } = hitungGrowthXl(d, dLalu);
-    const isGroup = isNamaGroup(nama); // baris "(Group)": tampil, tapi TIDAK ikut TOTAL
-
-    // Baris ke-2, ke-4, dst (0-indexed: ganjil) dikasih background abu-abu
-    // tipis, sama seperti tr:nth-child(even) di tampilan web.
-    const stripeBg = iBaris % 2 === 1 ? XL_ABU_STRIPE : undefined;
-
-    // Kumulatif untuk total
-    const twNow = twTerakhirAdaData(d.tw);
-    let kumulIni = 0, kumulLalu = 0;
-    if (twNow !== null) {
-      for (let t = 1; t <= twNow; t++) { kumulIni += d.tw[t] || 0; kumulLalu += dLalu.tw[t] || 0; }
-    }
-    if (!isGroup) {
-      totalKumulIni  += kumulIni;
-      totalKumulLalu += kumulLalu;
-    }
-
-    let col = 0;
-    setCell(dataRow, col++, xlCell(d.idtanaman || "-", { align: "left", bgColor: stripeBg }));
-    setCell(dataRow, col++, xlCell(nama,               { align: "left", bgColor: stripeBg }));
-    setCell(dataRow, col++, xlCell(rc.satuan,          { align: "left", bgColor: stripeBg }));
-
-    if (pakaiBulan) {
-      for (let b = 1; b <= 12; b++) {
-        const v = d.bulan[b] || 0;
-        if (!isGroup) totalBulan[b] += v;
-        setCell(dataRow, col++, xlCell(v === 0 ? null : v, { numFmt: "#,##0.00", bgColor: stripeBg }));
-      }
-    }
-    for (let t = 1; t <= 4; t++) {
-      const v = d.tw[t] || 0;
-      if (!isGroup) {
-        totalTw[t]   += v;
-        totalTwLalu[t] += (dLalu.tw[t] || 0);
-      }
-      setCell(dataRow, col++, xlCell(v === 0 ? null : v, { numFmt: "#,##0.00", bgColor: stripeBg }));
-    }
-
-    const jumlah = (d.tw[1]||0)+(d.tw[2]||0)+(d.tw[3]||0)+(d.tw[4]||0);
-    setCell(dataRow, col++, xlCell(jumlah === 0 ? null : jumlah, { numFmt: "#,##0.00", bgColor: stripeBg }));
-
-    // Growth cells — warna teks sesuai nilai (hijau naik / merah turun),
-    // tetap dikasih stripeBg biar background baris tetap konsisten.
-    const growthCell = (v) => {
-      if (v === null) return xlCell("-", { bgColor: stripeBg });
-      const color = v > 0 ? XL_HIJAU_GROWTH : v < 0 ? XL_MERAH_GROWTH : undefined;
-      return xlCell(v, { numFmt: "#,##0.00", color, bgColor: stripeBg });
+  let r = 2;
+  const tulisBaris = (kode, nama, satuan, d, hasil, bold, bg) => {
+    let c = 0;
+    const num = (x) => xlCell(x === 0 ? null : x, { numFmt: "#,##0.00", bgColor: bg, bold });
+    const growth = (x) => {
+      if (x === null) return xlCell("-", { bgColor: bg, bold });
+      const color = x > 0 ? XL_HIJAU_GROWTH : x < 0 ? XL_MERAH_GROWTH : undefined;
+      return xlCell(x, { numFmt: "#,##0.00", color, bgColor: bg, bold });
     };
-    setCell(dataRow, col++, growthCell(qtoq));
-    setCell(dataRow, col++, growthCell(yoy));
-    setCell(dataRow, col++, growthCell(ctoc));
-
-    dataRow++;
-  });
-
-  // ---- Baris TOTAL ----
-  const totalD     = { tw: totalTw };
-  const totalDLalu = { tw: totalTwLalu };
-  const { qtoq: qtoqT, yoy: yoyT, ctoc: ctocT } = hitungGrowthXl(totalD, totalDLalu);
-  // override kumulatif total (hitungGrowthXl pakai twTerakhir dari totalTw yg mungkin beda)
-  // hitung ulang pakai totalKumulIni/Lalu yang sudah diakumulasi di loop
-  const twNowTotal = twTerakhirAdaData(totalTw);
-  let qtoqTf = null, yoyTf = null, ctocTf = null;
-  if (twNowTotal !== null) {
-    const vNow   = totalTw[twNowTotal];
-    const vPrevQ = twNowTotal === 1 ? totalTwLalu[4] : totalTw[twNowTotal - 1];
-    const vYoy   = totalTwLalu[twNowTotal];
-    ({ qtoq: qtoqTf, yoy: yoyTf, ctoc: ctocTf } =
-      hitungGrowth(vNow, vPrevQ, vYoy, totalKumulIni, totalKumulLalu));
-  }
-
-  let col = 0;
-  setCell(dataRow, col++, xlCell("",       { bold: true, bgColor: XL_TOTAL_BG }));
-  setCell(dataRow, col++, xlCell("TOTAL",  { bold: true, bgColor: XL_TOTAL_BG, align: "left" }));
-  setCell(dataRow, col++, xlCell("",       { bold: true, bgColor: XL_TOTAL_BG }));
-
-  if (pakaiBulan) {
-    for (let b = 1; b <= 12; b++) {
-      const v = totalBulan[b] || 0;
-      setCell(dataRow, col++, xlCell(v === 0 ? null : v, { bold: true, bgColor: XL_TOTAL_BG, numFmt: "#,##0.00" }));
-    }
-  }
-  for (let t = 1; t <= 4; t++) {
-    const v = totalTw[t] || 0;
-    setCell(dataRow, col++, xlCell(v === 0 ? null : v, { bold: true, bgColor: XL_TOTAL_BG, numFmt: "#,##0.00" }));
-  }
-  const jumlahTotal = (totalTw[1]||0)+(totalTw[2]||0)+(totalTw[3]||0)+(totalTw[4]||0);
-  setCell(dataRow, col++, xlCell(jumlahTotal === 0 ? null : jumlahTotal, { bold: true, bgColor: XL_TOTAL_BG, numFmt: "#,##0.00" }));
-
-  const growthTotalCell = (v) => {
-    if (v === null) return xlCell("-", { bold: true, bgColor: XL_TOTAL_BG });
-    const color = v > 0 ? XL_HIJAU_GROWTH : v < 0 ? XL_MERAH_GROWTH : undefined;
-    return xlCell(v, { bold: true, bgColor: XL_TOTAL_BG, numFmt: "#,##0.00", color });
+    setCell(r, c++, xlCell(kode, { align: "left", bgColor: bg, bold }));
+    setCell(r, c++, xlCell(nama, { align: "left", bgColor: bg, bold }));
+    setCell(r, c++, xlCell(satuan, { align: "left", bgColor: bg, bold }));
+    if (pakaiBulan) for (let b = 1; b <= 12; b++) setCell(r, c++, num(d.bulan[b] || 0));
+    for (let t = 1; t <= 4; t++) setCell(r, c++, num(d.tw[t] || 0));
+    setCell(r, c++, num(hasil.jumlah));
+    setCell(r, c++, growth(hasil.qtoq));
+    setCell(r, c++, growth(hasil.yoy));
+    setCell(r, c++, growth(hasil.ctoc));
+    r++;
   };
-  setCell(dataRow, col++, growthTotalCell(qtoqTf));
-  setCell(dataRow, col++, growthTotalCell(yoyTf));
-  setCell(dataRow, col++, growthTotalCell(ctocTf));
 
-  ws["!ref"]  = XLSX.utils.encode_range(range);
-
-  // Lebar kolom: Nama agak lebar, sisanya standar
-  const colWidths = headers.map((h, i) => {
-    if (i === 1) return { wch: 28 };  // Nama
-    if (i === 2) return { wch: 10 };  // Satuan
-    if (i === 0) return { wch: 14 };  // Kode
-    return { wch: 11 };
+  data.baris.forEach((x, i) => {
+    tulisBaris(x.d.idtanaman || "-", x.nama, v.satuan, x.d, x.hasil, false, i % 2 === 1 ? XL_ABU_STRIPE : undefined);
   });
-  ws["!cols"] = colWidths;
+  if (data.total) tulisBaris("", "TOTAL", "", data.total.d, data.total.hasil, true, XL_TOTAL_BG);
 
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  ws["!ref"] = XLSX.utils.encode_range(range);
+  ws["!cols"] = headers.map((h, i) => (i === 1 ? { wch: 28 } : i === 2 ? { wch: 12 } : i === 0 ? { wch: 14 } : { wch: 11 }));
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.replace(/[:\\/?*[\]]/g, "").slice(0, 31));
 }
 
+// Download = tabulasi sesuai filter yang sedang dipilih (Jenis, Variabel, Tahun, Kab, Kec)
 async function downloadRangkumanExcel() {
   if (!state.profile) return;
-
-  const tahun      = Number($("sel-tahun-rangkuman").value);
+  const jenis = $("sel-jenis-rangkuman").value;
+  const cfg = SPH_CONFIG[jenis];
+  const v = varRangkumanAktif(jenis);
+  const tahun = Number($("sel-tahun-rangkuman").value);
   const kabPilihan = $("sel-kab-rangkuman").value;
-  const btn        = $("btn-download-rangkuman");
-  const log        = $("log-download-rangkuman");
+  const kecPilihan = $("sel-kec-rangkuman").value;
+  const btn = $("btn-download-rangkuman");
+  const log = $("log-download-rangkuman");
 
   btn.disabled = true;
   btn.textContent = "⏳ Mengambil data...";
-  log.textContent = "Memuat semua jenis SPH...";
-
-  const jenisUrutan = ["sbs", "bst", "tbf", "th"]; // urutan sheet di Excel
-
+  log.textContent = "Memuat data...";
   try {
-    // Fetch semua jenis + tahun lalu secara paralel
-    const hasilFetch = await Promise.all(
-      jenisUrutan.map(async (jenis) => {
-        const cfg = SPH_CONFIG[jenis];
-        const rc  = cfg.rangkuman;
-        if (!rc) return { jenis, rowsIni: [], rowsLalu: [] };
+    const [rowsIni, rowsLalu] = await Promise.all([
+      ambilRowsRangkuman(cfg, v, tahun, kabPilihan, kecPilihan),
+      ambilRowsRangkuman(cfg, v, tahun - 1, kabPilihan, kecPilihan),
+    ]);
+    if (rowsIni.length === 0) { log.textContent = `Tidak ada data ${cfg.label} tahun ${tahun} untuk pilihan ini.`; return; }
 
-        const ambil = (thn) => fetchAllRows((from, to) => {
-          let q = supabase
-            .from(cfg.table)
-            .select(`namatanaman, idtanaman, ${cfg.periodeCol}, ${rc.produksiCol}`)
-            .eq("tahun", thn);
-          if (kabPilihan !== "semua") q = q.eq("nama_kab", kabPilihan);
-          return q.range(from, to);
-        });
-
-        const [rowsIni, rowsLalu] = await Promise.all([ambil(tahun), ambil(tahun - 1)]);
-        return { jenis, rowsIni, rowsLalu };
-      })
-    );
-
-    log.textContent = "Menyusun Excel...";
-
+    const data = susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis);
     const wb = XLSX.utils.book_new();
-
-    for (const { jenis, rowsIni, rowsLalu } of hasilFetch) {
-      const cfg      = SPH_CONFIG[jenis];
-      const rc       = cfg.rangkuman;
-      if (!rc) continue;
-      if (rowsIni.length === 0) continue; // skip jenis yang tidak ada datanya
-      tulisSheetRangkuman(wb, cfg.label, cfg, rc, rowsIni, rowsLalu, jenis, tahun, kabPilihan);
-    }
-
-    if (wb.SheetNames.length === 0) {
-      log.textContent = `Tidak ada data untuk tahun ${tahun}.`;
-      return;
-    }
+    tulisSheetRangkuman(wb, v.label, cfg, v, data, tahun, labelWilayahRangkuman(kabPilihan, kecPilihan));
 
     const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabPilihan);
-    const labelKabFile = kabPilihan === "semua" ? "SemuaKab" : (kabEntry ? kabEntry.nama.replace(/\s+/g, "") : kabPilihan);
-    const namaFile = `Rangkuman_SPH_${labelKabFile}_${tahun}.xlsx`;
-
+    let labelFile = kabPilihan === "semua" ? "SemuaKab" : (kabEntry ? kabEntry.nama : kabPilihan).replace(/\s+/g, "");
+    if (kecPilihan !== "semua") labelFile += "_" + kecPilihan.replace(/\s+/g, "");
+    const namaFile = `Tabulasi_${cfg.label}_${v.label.replace(/[^A-Za-z0-9]+/g, "")}_${labelFile}_${tahun}.xlsx`;
     XLSX.writeFile(wb, namaFile, { bookSST: false, cellStyles: true });
-    log.textContent = `✓ Selesai! ${wb.SheetNames.length} sheet (${wb.SheetNames.join(", ")}) → "${namaFile}"`;
-    // Pesan sukses otomatis hilang setelah beberapa detik supaya tidak
-    // nyangkut terus di layar walau usernya sudah pindah2 filter lain.
-    setTimeout(() => {
-      if (log.textContent.startsWith("✓ Selesai!")) log.textContent = "";
-    }, 6000);
+    log.textContent = `✓ Selesai! → "${namaFile}"`;
+    setTimeout(() => { if (log.textContent.startsWith("✓ Selesai!")) log.textContent = ""; }, 6000);
   } catch (e) {
     log.textContent = `✗ Gagal: ${e.message}`;
   } finally {
@@ -2007,7 +1868,7 @@ const KOLOM_ANOMALI_SORTABLE = [
   { key: "kalimat_anomali", label: "Anomali", tipe: "teks" },
   { key: "tindak_lanjut", label: "Tindak Lanjut", tipe: "teks" },
   { key: "konfirmasi_kabkot", label: null, tipe: "teks" }, // label kolom ini dinamis (nama kab), lihat renderAnomali
-  { key: "approval_provinsi", label: "Approval Provinsi", tipe: "teks" },
+  { key: "approval_provinsi", label: "Approval", tipe: "teks" },
 ];
 
 // Sort DEFAULT (kolom "no_urut"): bukan cuma angka no_urut polos (yang
@@ -2205,7 +2066,7 @@ function perbaruiLabelHeaderAnomali() {
   const modeSemua = $("sel-kab-anomali")?.value === "semua";
   const jenisAktif = $("sel-jenis-anomali").value;
   const labelKonfirmasiKol = modeSemua ? "Konfirmasi Kabkot" : `Konfirmasi ${labelKabAnomaliAktif()}`;
-  const labelKolom = { _kab: "Kabupaten", no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval Provinsi" };
+  const labelKolom = { _kab: "Kabupaten", no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
   table.querySelectorAll("thead th.th-sortable").forEach((th) => {
     const key = th.dataset.kolom;
     const panah = kolomAktif === key ? (arahAktif === "asc" ? " ▲" : " ▼") : "";
@@ -2624,6 +2485,8 @@ function renderAnomali(rows) {
   // sph1900) -- cuma provFull yang boleh centang baris & hapus baris
   // satu-satu (kolom checkbox + tombol ✕).
   const provFull = prov && !isProvTerbatas();
+  // Tindak Lanjut & Konfirmasi: kabkot + super admin. Admin prov terbatas (sph1900) tidak bisa edit apa pun.
+  const bisaIsiKonfirmasi = provFull || !prov;
   const kabIdAktif = $("sel-kab-anomali").value;
   const modeSemua = kabIdAktif === "semua";
   const labelKab = labelKabAnomaliAktif();
@@ -2657,7 +2520,7 @@ function renderAnomali(rows) {
   const { kolom: kolomAktif, arah: arahAktif } = state.anomaliSort;
   // Kalau mode semua, judul kolom konfirmasi kabkot dibuat generik
   const labelKonfirmasiKol = modeSemua ? "Konfirmasi Kabkot" : `Konfirmasi ${labelKab}`;
-  const labelKolom = { no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval Provinsi" };
+  const labelKolom = { no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
   const clsExtra = {
     no_urut: "col-no",
     kecamatan: "col-kecamatan",
@@ -2755,25 +2618,25 @@ function renderAnomali(rows) {
     // 1,2,3,... mengikuti urutan baris yang tampil -- BUKAN no_urut asli
     // dari database (yang direset per kabupaten jadi 1,1,1,1,...).
     const nilaiNo = modeSemua ? (idxBaris + 1) : (r.no_urut ?? "");
-    const tdNo = editableTd(nilaiNo, "no_urut", prov && !modeSemua, true);
+    const tdNo = editableTd(nilaiNo, "no_urut", provFull && !modeSemua, true);
     tdNo.classList.add("col-no");
 
-    const tdKecamatan = buatTdKecamatan(r.id, r.kecamatan ?? "", prov, state.daftarKecAktif);
+    const tdKecamatan = buatTdKecamatan(r.id, r.kecamatan ?? "", provFull, state.daftarKecAktif);
     tdKecamatan.classList.add("col-kecamatan");
 
-    const tdKomoditi = buatTdKomoditi(r.id, r.nama_komoditi ?? "", prov);
+    const tdKomoditi = buatTdKomoditi(r.id, r.nama_komoditi ?? "", provFull);
     tdKomoditi.classList.add("col-komoditi");
 
-    const tdBulan = buatTdBulan(r.id, r.bulan, prov, jenisAktif);
+    const tdBulan = buatTdBulan(r.id, r.bulan, provFull, jenisAktif);
     tdBulan.classList.add("td-bulan", "col-bulan");
 
-    const tdKalimat = buatTdKalimat(r, prov);
+    const tdKalimat = buatTdKalimat(r, provFull);
     tdKalimat.classList.add("col-anomali");
 
-    const tdTindakLanjut = buatTdTindakLanjut(r.id, r.tindak_lanjut ?? "", !prov);
+    const tdTindakLanjut = buatTdTindakLanjut(r.id, r.tindak_lanjut ?? "", bisaIsiKonfirmasi);
     tdTindakLanjut.classList.add("col-tindak-lanjut");
 
-    const tdKabkot = editableTd(r.konfirmasi_kabkot ?? "", "konfirmasi_kabkot", !prov, false);
+    const tdKabkot = editableTd(r.konfirmasi_kabkot ?? "", "konfirmasi_kabkot", bisaIsiKonfirmasi, false);
     tdKabkot.classList.add("col-kabkot");
 
     const tdApproval = document.createElement("td");
@@ -3610,7 +3473,7 @@ $("btn-download-anomali-kabkot")?.addEventListener("click", downloadAnomaliExcel
 // file ini utk mengisi "Konfirmasi Kabkot" (lihat uploadKonfirmasiKabkot()).
 // JANGAN diubah/dihapus user, dan JANGAN dipakai utk baris baru yang
 // ditambah manual di Excel (baris tanpa ID otomatis dilewati saat upload).
-const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval Provinsi"];
+const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval"];
 const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
 
 // Helper: tulis 1 sheet Anomali dari array rows (dipakai baik utk

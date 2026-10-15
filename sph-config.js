@@ -167,3 +167,39 @@ export const DAFTAR_KAB_BABEL = [
   { id: "Belitung Timur", nama: "Kab. Belitung Timur" },
   { id: "Kota Pangkal Pinang", nama: "Kota Pangkal Pinang" },
 ];
+
+
+// ============================================================
+// Variabel utk menu "Tabulasi Data".
+// mode: "sum"  = dijumlah (luas/produksi)
+//       "avg"  = rata-rata nilai non-nol (harga)
+//       "stok" = nilai posisi (TBM/TM) -> "Jumlah" = TW terakhir yg ada data
+// cols: kolom DB yang dijumlah (luas/produksi total = habis + belum habis)
+// ============================================================
+const _luas = (sat) => [
+  { key: "luas_habis",  label: "Luas Panen Habis",       satuan: sat, mode: "sum", cols: ["luas_panen_habis"] },
+  { key: "luas_belum",  label: "Luas Panen Belum Habis", satuan: sat, mode: "sum", cols: ["luas_panen_belum_habis"] },
+  { key: "luas_total",  label: "Luas Panen Total",       satuan: sat, mode: "sum", cols: ["luas_panen_habis", "luas_panen_belum_habis"] },
+];
+const _prod = (sat) => [
+  { key: "prod_habis",  label: "Produksi Habis",       satuan: sat, mode: "sum", cols: ["produksi_habis"] },
+  { key: "prod_belum",  label: "Produksi Belum Habis", satuan: sat, mode: "sum", cols: ["produksi_belum_habis"] },
+  { key: "prod_total",  label: "Produksi Total",       satuan: sat, mode: "sum", cols: ["produksi_habis", "produksi_belum_habis"] },
+];
+const _harga = { key: "harga", label: "Harga Jual Petani", satuan: "Rp/Kg", mode: "avg", cols: ["harga_jual_petani"] };
+
+export const VARIABEL_RANGKUMAN = {
+  sbs: [..._luas("Ha"), ..._prod("Kuintal"), _harga],
+  tbf: [..._luas("M2"), ..._prod("Kg"),      _harga],
+  th:  [
+    { key: "luas_habis", label: "Luas Panen Habis", satuan: "Ha", mode: "sum", cols: ["luas_panen_habis"] },
+    { key: "prod_habis", label: "Produksi Habis", satuan: "Pohon", mode: "sum", cols: ["produksi_habis"] },
+    _harga,
+  ],
+  bst: [
+    { key: "produksi", label: "Produksi", satuan: "Kuintal",       mode: "sum",  cols: ["produksi"] },
+    { key: "tbm",      label: "TBM (Tanaman Belum Menghasilkan)", satuan: "Pohon/Rumpun", mode: "stok", cols: ["tanaman_belum_hasil"] },
+    { key: "tm",       label: "TM (Tanaman Menghasilkan)",        satuan: "Pohon/Rumpun", mode: "stok", cols: ["tanaman_produktif_hasil"] },
+    _harga,
+  ],
+};

@@ -156,16 +156,30 @@
               </select>
             </div>
             <div class="field">
+              <label>Variabel</label>
+              <select id="sel-variabel-rangkuman"></select>
+            </div>
+            <div class="field">
               <label>Tahun</label>
               <select id="sel-tahun-rangkuman"></select>
             </div>
             <div class="field">
-              <label>Kabupaten</label>
+              <label>Kabupaten/Kota</label>
               <select id="sel-kab-rangkuman">
                 <option value="semua">— Semua Kabupaten/Kota (Provinsi) —</option>
               </select>
             </div>
-            <div class="field" style="min-width:0; flex: 1 1 190px;">
+            <div class="field">
+              <label>Kecamatan</label>
+              <select id="sel-kec-rangkuman">
+                <option value="semua">— Semua Kecamatan —</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:0; flex: 0 0 64px;">
+              <label>&nbsp;</label>
+              <button class="btn-login" id="btn-ok-rangkuman" style="width:100%;">OK</button>
+            </div>
+            <div class="field" style="min-width:0; flex: 1 1 150px;">
               <label>&nbsp;</label>
               <button class="btn-login" id="btn-download-rangkuman" style="width:100%;" disabled>
                 ⬇ Download Tabulasi Data SPH
@@ -175,7 +189,7 @@
           <div style="margin:-4px 0 10px; font-size:11px; color:#888; font-style:italic;" id="log-download-rangkuman"></div>
 
           <div id="rangkuman-area">
-            <div class="placeholder-kosong">Pilih jenis SPH, tahun & kabupaten untuk mulai.</div>
+            <div class="placeholder-kosong">Pilih filter lalu klik OK untuk menampilkan tabulasi.</div>
           </div>
         </div>
 
