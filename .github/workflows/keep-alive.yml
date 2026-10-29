@@ -2,20 +2,39 @@ name: Supabase Keep Alive CUMASI
 
 on:
   schedule:
-    - cron: "0 2 */3 * *"   # tiap 3 hari, jam 02:00 UTC (09:00 WIB)
+    - cron: "0 2 * * *"      # TIAP HARI jam 02:00 UTC (09:00 WIB)
+    - cron: "0 14 * * *"     # cadangan: jam 14:00 UTC (21:00 WIB)
   workflow_dispatch:         # bisa dijalankan manual dari tab Actions
 
 permissions:
-  contents: write            # dibutuhkan untuk commit otomatis (keep repo aktif)
+  contents: write            # untuk commit otomatis (keep repo aktif)
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase CUMASI
+      - name: Ping Supabase (query database via RPC + tabel)
+        env:
+          SB_URL: https://urmqvzbyqfzlgcsuuokw.supabase.co
+          SB_KEY: sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI
         run: |
-          curl -sf "https://urmqvzbyqfzlgcsuuokw.supabase.co/rest/v1/data_sbs?select=tahun&limit=1" \
-            -H "apikey: sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI"
+          set -e
+
+          echo "1) RPC keep_alive (query langsung ke Postgres)"
+          curl -sf --retry 5 --retry-delay 20 --retry-all-errors \
+            -X POST "$SB_URL/rest/v1/rpc/keep_alive" \
+            -H "apikey: $SB_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+          echo
+
+          echo "2) Select tabel data_sbs"
+          curl -sf --retry 5 --retry-delay 20 --retry-all-errors \
+            "$SB_URL/rest/v1/data_sbs?select=tahun&limit=1" \
+            -H "apikey: $SB_KEY"
+          echo
+
+          echo "OK: Supabase merespons."
 
   keep-repo-active:
     runs-on: ubuntu-latest
@@ -23,13 +42,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Commit kosong jika repo sepi lebih dari 45 hari
+      - name: Commit kosong jika repo sepi lebih dari 30 hari
         run: |
           LAST=$(git log -1 --format=%ct)
           NOW=$(date +%s)
           DAYS=$(( (NOW - LAST) / 86400 ))
           echo "Commit terakhir $DAYS hari lalu"
-          if [ "$DAYS" -ge 45 ]; then
+          if [ "$DAYS" -ge 30 ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit --allow-empty -m "chore: keep repo active (otomatis)"
