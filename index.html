@@ -201,7 +201,7 @@
               <select id="sel-tahun-anomali"></select>
             </div>
             <div class="field">
-              <label>Triwulan</label>
+              <label id="lbl-periode-anomali">Triwulan</label>
               <select id="sel-triwulan-anomali">
                 <option value="semua">— Semua Triwulan —</option>
                 <option value="1">Triwulan 1</option>
@@ -246,6 +246,22 @@
 
           <div id="anomali-area">
             <div class="placeholder-kosong">Pilih jenis SPH & wilayah untuk mulai.</div>
+          </div>
+
+          <!-- ===== POPUP: TAMBAH BARIS (pilih kabupaten saat mode Semua) ===== -->
+          <div class="modal-overlay hidden" id="modal-tambah-anomali">
+            <div class="modal-box">
+              <div class="modal-title">
+                Tambah Baris Anomali
+                <button type="button" class="modal-close" id="btn-tutup-tambah-anomali">✕</button>
+              </div>
+              <div class="field">
+                <label>Kabupaten/Kota</label>
+                <select id="sel-kab-tambah"></select>
+              </div>
+              <button class="btn-login" id="btn-konfirmasi-tambah-anomali">+ Tambah Baris</button>
+              <button class="btn-login btn-batal" id="btn-batal-tambah-anomali">Batal</button>
+            </div>
           </div>
 
           <!-- ===== POPUP: HAPUS SEMUA ANOMALI ===== -->

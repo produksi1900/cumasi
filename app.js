@@ -1599,7 +1599,7 @@ $("btn-download-rangkuman").addEventListener("click", downloadRangkumanExcel);
 // ============================================================
 // PANEL KANAN — VIEW: KONFIRMASI ANOMALI
 // ============================================================
-$("sel-jenis-anomali").addEventListener("change", muatAnomali);
+$("sel-jenis-anomali").addEventListener("change", () => { isiFilterPeriodeAnomali(); muatAnomali(); });
 $("sel-kab-anomali").addEventListener("change", muatAnomali);
 $("sel-tahun-anomali").addEventListener("change", muatAnomali);
 $("sel-triwulan-anomali").addEventListener("change", muatAnomali);
@@ -1621,19 +1621,55 @@ function triwulanAnomaliAktif() {
 // Terapkan filter triwulan ke query konfirmasi_anomali utk 1 jenis SPH.
 // Kolom "bulan" di tabel ini berisi 1-12 utk SBS (jadi TW n = bulan
 // (n-1)*3+1 s.d. n*3), dan 1-4 utk BST/TBF/TH (langsung = triwulan).
+function modePeriodeAnomali() {
+  return $("sel-jenis-anomali").value === "sbs" ? "bulan" : "tw";
+}
+
+// SPH-SBS = filter BULAN (1-12). SPH lain = filter TRIWULAN (1-4).
 function terapkanFilterTriwulan(q, jenis) {
-  const tw = triwulanAnomaliAktif();
-  if (tw === null) return q;
-  if (jenis === "sbs") return q.gte("bulan", (tw - 1) * 3 + 1).lte("bulan", tw * 3);
+  const v = triwulanAnomaliAktif();
+  if (v === null) return q;
+  const mode = modePeriodeAnomali();
+  if (jenis === "sbs") {
+    if (mode === "bulan") return q.eq("bulan", v);
+    return q.gte("bulan", (v - 1) * 3 + 1).lte("bulan", v * 3);
+  }
+  const tw = mode === "bulan" ? Math.ceil(v / 3) : v;
   return q.eq("bulan", tw);
 }
 
 // Versi utk query yang mencampur SEMUA jenis SPH sekaligus (Dashboard).
 function terapkanFilterTriwulanSemuaJenis(q) {
-  const tw = triwulanAnomaliAktif();
-  if (tw === null) return q;
-  const b1 = (tw - 1) * 3 + 1, b2 = tw * 3;
-  return q.or(`and(jenis.eq.sbs,bulan.gte.${b1},bulan.lte.${b2}),and(jenis.neq.sbs,bulan.eq.${tw})`);
+  const v = triwulanAnomaliAktif();
+  if (v === null) return q;
+  let sbsCond, tw;
+  if (modePeriodeAnomali() === "bulan") {
+    sbsCond = `and(jenis.eq.sbs,bulan.eq.${v})`;
+    tw = Math.ceil(v / 3);
+  } else {
+    sbsCond = `and(jenis.eq.sbs,bulan.gte.${(v - 1) * 3 + 1},bulan.lte.${v * 3})`;
+    tw = v;
+  }
+  return q.or(`${sbsCond},and(jenis.neq.sbs,bulan.eq.${tw})`);
+}
+
+// Isi ulang dropdown periode: SBS -> Bulan (Jan-Des), lainnya -> Triwulan.
+function isiFilterPeriodeAnomali() {
+  const sel = $("sel-triwulan-anomali");
+  const mode = modePeriodeAnomali();
+  if (sel.dataset.mode === mode) return;
+  sel.dataset.mode = mode;
+  const lbl = $("lbl-periode-anomali");
+  if (mode === "bulan") {
+    if (lbl) lbl.textContent = "Bulan";
+    sel.innerHTML = `<option value="semua">— Semua Bulan —</option>` +
+      NAMA_BULAN.slice(1).map((n, i) => `<option value="${i + 1}">${n}</option>`).join("");
+  } else {
+    if (lbl) lbl.textContent = "Triwulan";
+    sel.innerHTML = `<option value="semua">— Semua Triwulan —</option>` +
+      [1, 2, 3, 4].map((t) => `<option value="${t}">Triwulan ${t}</option>`).join("");
+  }
+  sel.value = "semua";
 }
 
 function isProv() { return state.profile?.role === "prov"; }
@@ -1728,6 +1764,7 @@ async function muatKecamatanKab(kabId) {
 }
 
 function siapkanSlicerAnomali() {
+  isiFilterPeriodeAnomali();
   const selKab = $("sel-kab-anomali");
   if (isProv()) {
     selKab.disabled = false;
@@ -1786,10 +1823,8 @@ async function muatAnomali() {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
       const tahunSemua = tahunAnomaliAktif() === null;
-      btnTambah.disabled = modeSemua || tahunSemua;
-      btnTambah.title = modeSemua
-        ? "Pilih kabupaten spesifik untuk menambah baris"
-        : (tahunSemua ? "Pilih tahun spesifik untuk menambah baris" : "");
+      btnTambah.disabled = false;
+      btnTambah.title = "";
     }
     // Upload Excel TIDAK perlu didisable di mode "Semua Kabupaten/Kota"
     // lagi -- kabupaten sekarang dibaca otomatis dari kolom
@@ -2498,10 +2533,8 @@ function renderAnomali(rows) {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
       const tahunSemua = tahunAnomaliAktif() === null;
-      btnTambah.disabled = modeSemua || tahunSemua;
-      btnTambah.title = modeSemua
-        ? "Pilih kabupaten spesifik untuk menambah baris"
-        : (tahunSemua ? "Pilih tahun spesifik untuk menambah baris" : "");
+      btnTambah.disabled = false;
+      btnTambah.title = "";
     }
   }
 
@@ -2936,47 +2969,68 @@ async function hapusTerpilihAnomali() {
 // ---- Tambah Baris: langsung insert baris baru pakai Triwulan & tahun
 // berjalan sekarang (twSekarang()/TAHUN_SEKARANG), tanpa perlu popup lagi --
 // kolom Periode sudah tidak ditampilkan di tabel, jadi gak perlu ditanya user. ----
-$("btn-buka-tambah-anomali")?.addEventListener("click", async () => {
-  const jenis = $("sel-jenis-anomali").value;
+$("btn-buka-tambah-anomali")?.addEventListener("click", () => {
   const kabId = $("sel-kab-anomali").value;
-  const tahunAktif = tahunAnomaliAktif();
-  if (tahunAktif === null) {
-    alert("Pilih dulu Tahun spesifik di dropdown (bukan \"— Semua Tahun —\") sebelum menambah baris.");
-    return;
+  if (kabId === "semua") {
+    // Mode "Semua Kabupaten/Kota": tanya dulu mau nambah baris di kabupaten mana
+    $("sel-kab-tambah").innerHTML = KAB_ANOMALI_LIST.map((k) => {
+      const e = DAFTAR_KAB_BABEL.find((d) => d.id === k);
+      return `<option value="${k}">${e ? e.nama : k}</option>`;
+    }).join("");
+    $("modal-tambah-anomali").classList.remove("hidden");
+  } else {
+    tambahBarisAnomali(kabId);
   }
-  const periodeTeks = `TW${twSekarang()} ${tahunAktif}`;
+});
+function tutupModalTambahAnomali() { $("modal-tambah-anomali").classList.add("hidden"); }
+$("btn-tutup-tambah-anomali")?.addEventListener("click", tutupModalTambahAnomali);
+$("btn-batal-tambah-anomali")?.addEventListener("click", tutupModalTambahAnomali);
+$("modal-tambah-anomali")?.addEventListener("click", (e) => {
+  if (e.target.id === "modal-tambah-anomali") tutupModalTambahAnomali();
+});
+$("btn-konfirmasi-tambah-anomali")?.addEventListener("click", async () => {
+  const kab = $("sel-kab-tambah").value;
+  tutupModalTambahAnomali();
+  await tambahBarisAnomali(kab);
+});
+
+async function tambahBarisAnomali(kabId) {
+  const jenis = $("sel-jenis-anomali").value;
+  // Kalau dropdown Tahun = "Semua Tahun", pakai tahun berjalan.
+  const tahun = tahunAnomaliAktif() ?? TAHUN_SEKARANG;
+  const v = triwulanAnomaliAktif();
+  let bulanVal, labelPeriode;
+  if (jenis === "sbs") {
+    bulanVal = v ?? (new Date().getMonth() + 1);       // SBS = bulanan
+    labelPeriode = BULAN_SINGKAT_ANOMALI[bulanVal - 1];
+  } else {
+    bulanVal = v ?? twSekarang();                      // BST/TBF/TH = triwulanan
+    labelPeriode = `Tw${bulanVal}`;
+  }
 
   try {
-    // PENTING: No urut baris baru WAJIB dihitung dari DATA ASLI di
-    // database utk kombinasi jenis+kab+tahun yang sedang aktif -- BUKAN
-    // dari jumlah <tr> yang kebetulan sedang tampil di #anomali-area.
-    // Kalau yang lagi tampil di layar itu tabel Dashboard Anomali (bukan
-    // daftar list), jumlah barisnya sama sekali tidak nyambung dgn
-    // jenis+kab+tahun yg aktif (bisa gabungan banyak kab & jenis lain),
-    // jadi no_urut yang dihasilkan jadi salah/meloncat (mis. jadi "10").
     const rowsSaatIni = await fetchAllRows((from, to) =>
       supabase.from("konfirmasi_anomali").select("id")
-        .eq("jenis", jenis).eq("kab_id", kabId).eq("tahun", tahunAktif)
+        .eq("jenis", jenis).eq("kab_id", kabId).eq("tahun", tahun)
         .range(from, to)
     );
     const noUrutBaru = (rowsSaatIni?.length || 0) + 1;
 
     const { error } = await supabase.from("konfirmasi_anomali").insert({
-      jenis, kab_id: kabId, tahun: tahunAktif,
+      jenis, kab_id: kabId, tahun,
       no_urut: noUrutBaru,
-      periode_teks: periodeTeks,
+      bulan: bulanVal,
+      periode_teks: `${labelPeriode} ${tahun}`,
       kecamatan: "", nama_komoditi: "", kalimat_anomali: "", tindak_lanjut: "",
       sumber: "M",
     });
     if (error) throw error;
-    // muatAnomali() otomatis balik menampilkan daftar list (bukan
-    // Dashboard) -- supaya baris yang baru ditambah langsung kelihatan
-    // & bisa langsung diisi.
     await muatAnomali();
   } catch (e) {
     alert("Gagal menambah baris: " + e.message);
   }
-});
+}
+
 
 // ---- Popup Hapus Semua Anomali: SEKARANG benar2 GLOBAL -- menghapus
 // SEMUA baris dari SEMUA jenis SPH & SEMUA kabupaten/kota sekaligus
@@ -3515,7 +3569,7 @@ async function downloadAnomaliExcel() {
   const twAktif = triwulanAnomaliAktif(); // null = semua triwulan ikut terdownload
   const kabList = modeSemua ? KAB_ANOMALI_LIST : [kabId];
   const labelTahunFile = tahunAktif === null ? "SemuaTahun" : String(tahunAktif);
-  const labelTwFile = twAktif === null ? "" : `_TW${twAktif}`;
+  const labelTwFile = twAktif === null ? "" : (modePeriodeAnomali() === "bulan" ? `_Bln${twAktif}` : `_TW${twAktif}`);
   const labelKabFile = modeSemua ? "SemuaKab" : (DAFTAR_KAB_BABEL.find((k) => k.id === kabId)?.nama || kabId).replace(/\s+/g, "");
 
   const wb = XLSX.utils.book_new();
@@ -3860,7 +3914,7 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
   }
 
   const labelTahunDash = tahunAktif !== null ? `— Tahun ${tahunAktif}` : "— Semua Tahun";
-  const labelTwDash = twAktif ? ` — Triwulan ${twAktif}` : "";
+  const labelTwDash = twAktif ? (modePeriodeAnomali() === "bulan" ? ` — Bulan ${NAMA_BULAN[twAktif]}` : ` — Triwulan ${twAktif}`) : "";
   const headerDashboard = `
     <div class="dashboard-anomali-header">
       <h3>📊 Dashboard Anomali — Semua Jenis SPH ${labelTahunDash}${labelTwDash}</h3>
