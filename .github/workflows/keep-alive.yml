@@ -18,19 +18,12 @@ jobs:
           SB_URL: https://urmqvzbyqfzlgcsuuokw.supabase.co
           SB_KEY: sb_publishable_IYTUdippTmgyikXMd92-rw_Wn5ld4CI
         run: |
-          call() {
-            code=$(curl -s -o /tmp/out -w "%{http_code}" --retry 3 --retry-delay 10 "$@")
-            echo "HTTP $code"; cat /tmp/out; echo
-            [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
-          }
-          ok=0
-          echo "1) RPC keep_alive"
-          call -X POST "$SB_URL/rest/v1/rpc/keep_alive" \
-            -H "apikey: $SB_KEY" -H "Content-Type: application/json" -d '{}' && ok=1
-          echo "2) Select data_sbs"
-          call "$SB_URL/rest/v1/data_sbs?select=tahun&limit=1" \
-            -H "apikey: $SB_KEY" && ok=1
-          [ "$ok" = 1 ] || { echo "Semua gagal"; exit 1; }
+          echo "RPC keep_alive (query langsung ke Postgres)"
+          code=$(curl -s -o /tmp/out -w "%{http_code}" --retry 5 --retry-delay 20 --retry-all-errors \
+            -X POST "$SB_URL/rest/v1/rpc/keep_alive" \
+            -H "apikey: $SB_KEY" -H "Content-Type: application/json" -d '{}')
+          echo "HTTP $code"; cat /tmp/out; echo
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ]
 
   keep-repo-active:
     runs-on: ubuntu-latest
