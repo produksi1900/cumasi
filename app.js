@@ -2239,7 +2239,7 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
     return o;
   };
 
-  tambahOpsi("", "Belum");
+  tambahOpsi("", "— Pilih —");
   opsi.forEach((n) => tambahOpsi(n, n));
   const optLain = tambahOpsi("__lain__", "Lainnya...");
   sel.value = nilaiSaatIni || "";
