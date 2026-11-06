@@ -970,15 +970,51 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
         pointRadius: 4,
         pointHoverRadius: 6,
         pointStyle: STYLE_TITIK[i % STYLE_TITIK.length],
+        tipe: s.tipe, key: s.key, kabId: s.kabId,
+        warnaAsli: PALET_WARNA[i % PALET_WARNA.length],
       })),
     },
     options: {
       responsive: true,
-      plugins: { legend: { position: "right", labels: { boxWidth: 12, font: { size: 10 } } } },
+      plugins: {
+        legend: {
+          position: "right",
+          labels: { boxWidth: 12, font: { size: 10 } },
+          // Klik legend = fokus ke garis itu (bukan sembunyikan); klik lagi = reset.
+          onClick: (e, item, legend) => {
+            const ds = legend.chart.data.datasets[item.datasetIndex];
+            const f = state.fokusGrafik;
+            if (f && f.tipe === ds.tipe && f.key === ds.key) state.fokusGrafik = null;
+            else state.fokusGrafik = { tipe: ds.tipe, key: ds.key, kabId: ds.kabId };
+            terapkanFokusGrafik();
+          },
+        },
+      },
       scales: { y: { beginAtZero: true, title: { display: true, text: yTitle } } },
     },
   });
   state.chartInstances.push(chart);
+}
+
+// Fokus tersinkron antar semua grafik: kec -> kabnya, kab -> kec2 di kab itu.
+function terapkanFokusGrafik() {
+  const f = state.fokusGrafik;
+  for (const chart of state.chartInstances) {
+    chart.data.datasets.forEach((ds) => {
+      let aktif = true;
+      if (f) {
+        if (ds.tipe === f.tipe) aktif = ds.key === f.key;
+        else aktif = ds.kabId === f.kabId;
+      }
+      const warna = aktif ? ds.warnaAsli : "rgba(190,190,190,0.4)";
+      ds.borderColor = warna;
+      ds.backgroundColor = warna;
+      ds.borderWidth = f && aktif ? 3.5 : f ? 1.5 : 2.5;
+      ds.pointRadius = f && !aktif ? 2 : 4;
+      ds.order = aktif ? 0 : 2;
+    });
+    chart.update("none");
+  }
 }
 
 function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
@@ -999,6 +1035,7 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
   area.innerHTML = "";
   state.chartInstances.forEach((c) => c.destroy());
   state.chartInstances = [];
+  state.fokusGrafik = null;
 
   area.appendChild(buatTabelKecPeriode({
     judul: `${tab.label} — ${komoditi}`, satuan: tab.satuan,
@@ -1041,6 +1078,7 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
     `Grafik ${tab.label} per Kecamatan — ${komoditi}`,
     headerLabels,
     kecRows.map((k) => ({
+      tipe: "kec", key: k.kode, kabId: $("sel-kab").value,
       label: k.nama,
       data: Array.from({ length: nPeriode }, (_, idx) => {
         const v = matrixUtama.get(`${k.kode}|${idx + 1}`) ?? null;
@@ -1054,7 +1092,7 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
     area,
     `Grafik Rata-Rata ${tab.label} per Kabupaten — ${komoditi}`,
     headerLabels,
-    DAFTAR_KAB_BABEL.map((kab) => ({ label: kab.nama, data: perKabAvg[kab.id] })),
+    DAFTAR_KAB_BABEL.map((kab) => ({ tipe: "kab", key: kab.id, kabId: kab.id, label: kab.nama, data: perKabAvg[kab.id] })),
     tab.satuan
   );
 

@@ -604,7 +604,7 @@ table.tabel-anomali td.col-kabkot, table.tabel-anomali th.col-kabkot {
   min-width: 260px; width: 32%;
 }
 table.tabel-anomali td.col-approval, table.tabel-anomali th.col-approval {
-  width: 80px; min-width: 72px; text-align: center;
+  width: 100px; min-width: 92px; text-align: center;
 }
 table.tabel-anomali th.col-approval {
   white-space: normal;
@@ -621,7 +621,7 @@ table.tabel-anomali select.sel-approval.approval-ya { background: #eafaf1; color
 table.tabel-anomali select.sel-approval.approval-tidak { background: #fdecea; color: var(--merah); font-weight: bold; }
 
 table.tabel-anomali td.col-label, table.tabel-anomali th.col-label {
-  width: 50px; min-width: 50px; text-align: center; white-space: nowrap;
+  width: 38px; min-width: 38px; text-align: center; white-space: nowrap; padding-left: 2px; padding-right: 2px;
 }
 .label-sumber {
   display: inline-block; min-width: 20px; padding: 2px 6px;
