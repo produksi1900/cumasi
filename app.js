@@ -2,9 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_KEY, EMAIL_DOMAIN } from "./config.js";
 import { SPH_CONFIG, DAFTAR_KAB_BABEL, VARIABEL_RANGKUMAN } from "./sph-config.js";
 
-// Sesi login disimpan di sessionStorage (per TAB), bukan localStorage
-// (default, dipakai bersama semua tab). Jadi tiap tab bisa login dengan
-// akun berbeda dan tidak saling menimpa saat di-refresh.
+// Sesi login disimpan di sessionStorage (per TAB), bukan localStorage.
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
     storage: window.sessionStorage,
@@ -17,38 +15,39 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 // State global
 // ============================================================
 const state = {
-  profile: null,       // {id, username, role, kab_id, nama_tampil}
-  tabAktif: null,       // key tab rekon yang sedang dipilih
-  chartInstances: [],   // instance-instance Chart.js aktif (di-destroy tiap render ulang)
-  idTanamanUrutan: { sbs: {}, bst: {}, tbf: {}, th: {} }, // jenis -> {namatanaman_lower: urutan}
-  anomaliRows: [],   // baris anomali yang sedang dimuat (sebelum disort utk render)
-  anomaliSort: { kolom: "no_urut", arah: "asc" }, // sort aktif tabel Konfirmasi Anomali
-  kecamatanPerKab: {}, // cache: kab_id -> [nama_kec, ...] (utk dropdown Kecamatan di Anomali)
+  profile: null,
+  tabAktif: null,
+  chartInstances: [],
+  idTanamanUrutan: { sbs: {}, bst: {}, tbf: {}, th: {} },
+  anomaliRows: [],
+  anomaliSort: { kolom: "no_urut", arah: "asc" },
+  kecamatanPerKab: {},
 };
 
 const TAHUN_AWAL = 2018;
 const TAHUN_SEKARANG = new Date().getFullYear();
 const KAB_ANOMALI_LIST = ["Bangka", "Belitung", "Bangka Barat", "Bangka Tengah", "Bangka Selatan", "Belitung Timur", "Kota Pangkal Pinang"];
 
+// Pilihan "Rincian" anomali per jenis SPH (bisa ditambah lewat "Lainnya...").
+const OPSI_RINCIAN = {
+  sbs: ["Habis", "Belum Habis", "Harga"],
+  tbf: ["Habis", "Belum Habis", "Harga"],
+  th:  ["Habis", "Harga"],
+  bst: ["Provitas", "Harga"],
+};
+
+// Label rincian otomatis dari tab provitas/harga (dipakai saat Generate Anomali)
+function rincianDariTab(tab) {
+  if (tab.key === "provitas_habis") return "Habis";
+  if (tab.key === "provitas_belum") return "Belum Habis";
+  if (tab.key === "harga") return "Harga";
+  if (tab.key === "provitas") return "Provitas";
+  return tab.label || "";
+}
+
 // ============================================================
-// PENTING — fetchAllRows()
+// fetchAllRows() — pagination .range() sampai habis (batas 1000 baris/request)
 // ============================================================
-// Supabase/PostgREST punya batas default jumlah baris per request
-// (biasanya 1000), TERLEPAS dari berapapun angka yang ditulis di
-// .limit() di sisi client. Kalau baris utk 1 kombinasi tahun+kab (atau
-// tahun+komoditi utk "semua kab") lebih banyak dari batas itu (gampang
-// kejadian kalau banyak kecamatan x komoditi x periode), maka baris yang
-// "kepotong" itu HILANG BEGITU SAJA dari hasil query -- urutan hasil
-// juga tidak dijamin, jadi komoditi mana yang kepotong bisa beda-beda
-// setiap kali sync ulang dari aplikasi desktop. Ini akar penyebab
-// "komoditi ada di database tapi ga muncul di dropdown / tabel Rata-Rata
-// / hasil download Excel".
-//
-// Fix: selalu ambil data lewat helper ini, yang melakukan pagination
-// pakai .range() sampai benar-benar habis (bukan cuma 1x request).
-//
-// queryFn menerima (from, to) dan harus mengembalikan query supabase
-// yang SUDAH di .select(...)/.eq(...)/.order(...) dst, tinggal di-range.
 const SUPABASE_PAGE_SIZE = 1000;
 async function fetchAllRows(queryFn) {
   let semua = [];
@@ -59,7 +58,7 @@ async function fetchAllRows(queryFn) {
     if (error) throw error;
     if (!data || data.length === 0) break;
     semua = semua.concat(data);
-    if (data.length < SUPABASE_PAGE_SIZE) break; // halaman terakhir
+    if (data.length < SUPABASE_PAGE_SIZE) break;
     from += SUPABASE_PAGE_SIZE;
   }
   return semua;
@@ -70,23 +69,12 @@ async function fetchAllRows(queryFn) {
 // ============================================================
 const $ = (id) => document.getElementById(id);
 
-// Auto-tinggikan textarea (combo Kecamatan/Komoditi) supaya teks yang
-// tidak muat 1 baris otomatis lanjut ke baris berikutnya di bawah,
-// bukan kepotong.
 function autoGrowTextarea(el) {
   el.style.height = "auto";
   el.style.height = el.scrollHeight + "px";
 }
 
-// ============================================================
-// Loading donut (menggantikan teks "⏳ Memuat data...") — donut
-// muter dengan persentase perkiraan di tengah. Persentase ini BUKAN
-// progress asli (kita tidak tahu progress request ke Supabase), cuma
-// perkiraan yang naik cepat di awal lalu melambat mendekati 90%
-// (sengaja tidak pernah nyampe 100% karena belum tentu selesai) --
-// begitu data beneran datang, konten area diganti (innerHTML lain)
-// dan timer otomatis berhenti sendiri begitu elemen svg-nya sudah
-// tidak ada lagi di DOM.
+// Loading donut dengan persentase perkiraan (bukan progress asli).
 function mulaiLoadingDonut(container, teks) {
   const id = "donut-" + Math.random().toString(36).slice(2);
   const circumference = 2 * Math.PI * 26;
@@ -129,11 +117,6 @@ function isiPilihanTahun(select, { withPilihSemua = false } = {}) {
   }
 }
 
-// Khusus dropdown Tahun di panel Konfirmasi Anomali: ada opsi
-// "— Semua Tahun —" (value "semua") supaya baris anomali lama yang
-// tahunnya belum diketahui (mis. hasil migrasi data lama yang gagal
-// dibaca tahunnya dari periode_teks) tetap bisa dilihat. Default yang
-// dipilih tetap tahun berjalan sekarang, bukan "semua".
 function isiPilihanTahunAnomali(select) {
   select.innerHTML = `<option value="semua">— Semua Tahun —</option>`;
   for (let y = TAHUN_SEKARANG; y >= TAHUN_AWAL; y--) {
@@ -171,8 +154,6 @@ function fmtPersen(v) {
   return v.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Kembalikan HTML <span> berwarna untuk nilai growth (persen).
-// null -> "-" (strip), positif -> hijau, negatif -> merah, nol -> hitam biasa.
 function fmtGrowthHtml(v, bold = false) {
   if (v === null || v === undefined || !isFinite(v)) {
     return bold ? `<strong>-</strong>` : `-`;
@@ -188,16 +169,13 @@ function normalisasiNamaTanaman(n) {
   return String(n ?? "").trim().toLowerCase();
 }
 
-// Baris "Group" (mis. "Cabai Besar (Group)", "Jamur (Group)") adalah
-// gabungan/rekap dari komoditi lain yang SUDAH ikut dihitung sendiri2 di
-// baris lain -- jadi harus TETAP ditampilkan di tabel Rangkuman, tapi
-// TIDAK boleh ikut dijumlah ke baris TOTAL (supaya tidak dobel hitung).
+// Baris "(Group)" tampil di Rangkuman tapi tidak ikut dijumlah ke TOTAL.
 function isNamaGroup(nama) {
   return /\(group\)/i.test(String(nama ?? ""));
 }
 
 // ============================================================
-// AUTH — layar login penuh sebelum masuk, app-shell tampil setelahnya
+// AUTH
 // ============================================================
 function tampilkanApp(masuk) {
   $("login-screen").classList.toggle("hidden", masuk);
@@ -229,14 +207,6 @@ async function masukKeApp() {
 
   state.profile = profile;
 
-  // ---- Update UI: header ----
-  // Label di pojok kanan header sekarang menunjukkan peran akun secara
-  // eksplisit (bukan nama_tampil bebas lagi):
-  // - prov penuh (mis. sphbps19)      -> "Super Admin Provinsi"
-  // - prov akses_terbatas (mis. sph1900) -> "Admin Provinsi"
-  // - kabkot (mis. sph1971, dst)      -> "Admin <Nama Kabupaten/Kota>"
-  //   (tanpa prefix "Kota"/"Kab." -- mis. "Kota Pangkal Pinang" jadi
-  //   cukup "Admin Pangkal Pinang").
   let labelUser;
   if (profile.role === "prov") {
     labelUser = profile.akses_terbatas ? "Admin Provinsi" : "Super Admin Provinsi";
@@ -251,11 +221,6 @@ async function masukKeApp() {
 
   tampilkanApp(true);
 
-  // ---- Toolbar Download Raw Data ----
-  // Sama untuk semua role, cuma beda kuncian Kabupaten:
-  // - prov  : boleh pilih kabupaten manapun / "Semua Kabupaten/Kota"
-  // - kabkot: terkunci ke kabupatennya sendiri (RLS di Supabase juga
-  //           membatasi ini, jadi ini cuma penyesuaian tampilan)
   isiPilihanTahun($("sel-tahun-download"));
   if (profile.role === "prov") {
     $("wrap-kab-download").classList.remove("hidden");
@@ -270,16 +235,10 @@ async function masukKeApp() {
 
   isiPilihanTahun($("sel-tahun-rekon"));
 
-  // ---- Upload Referensi ID Tanaman (khusus prov, dan BUKAN prov yang
-  // "akses_terbatas" -- akun seperti sph1900 tampilannya sama seperti
-  // provinsi biasa, tapi tidak boleh mengubah referensi ID Tanaman). ----
   $("wrap-referensi").classList.toggle("hidden", profile.role !== "prov" || profile.akses_terbatas === true);
 
-  // ---- Panel Rangkuman: siapkan pilihan tahun & kabupaten ----
   isiPilihanTahun($("sel-tahun-rangkuman"));
   if (profile.role === "kabkot") {
-    // Sama seperti panel Rekonsiliasi: kabkot dikunci ke kabupatennya
-    // sendiri, tidak boleh pilih "Semua Kabupaten/Kota" atau kab lain.
     const namakabDB = profile.kab_id;
     const kabEntryRangkuman = DAFTAR_KAB_BABEL.find((k) => k.id === namakabDB);
     const labelKabRangkuman = kabEntryRangkuman ? kabEntryRangkuman.nama : namakabDB;
@@ -302,10 +261,9 @@ async function masukKeApp() {
   await muatReferensiIdTanaman();
   await siapkanKabSelect();
   await muatUlangJenis();
-  await muatData(); // render otomatis begitu selesai login, tanpa perlu klik ulang dropdown
+  await muatData();
 
   mulaiRotasiInfo();
-
 }
 
 function keluarDariApp() {
@@ -330,7 +288,6 @@ function keluarDariApp() {
   $("in-password").value = "";
   $("login-error").textContent = "";
 
-  // Reset panel kanan balik ke view Rekonsiliasi
   gantiView("rekon");
   $("rangkuman-area").innerHTML = `<div class="placeholder-kosong">Pilih filter lalu klik OK untuk menampilkan tabulasi.</div>`;
   $("anomali-area").innerHTML = `<div class="placeholder-kosong">Pilih jenis SPH & kabupaten untuk mulai.</div>`;
@@ -370,13 +327,12 @@ async function login() {
 }
 
 $("btn-logout").addEventListener("click", async () => {
-  await supabase.auth.signOut({ scope: "local" }); // keluar di tab ini saja
+  await supabase.auth.signOut({ scope: "local" });
   keluarDariApp();
 });
 
 // ============================================================
-// TOGGLE PANEL KANAN: Rekonsiliasi <-> Rangkuman
-
+// TOGGLE PANEL KANAN
 // ============================================================
 function gantiView(view) {
   $("view-rekon").classList.toggle("hidden", view !== "rekon");
@@ -393,22 +349,8 @@ $("btn-view-anomali").addEventListener("click", () => gantiView("anomali"));
 $("btn-view-rangkuman").addEventListener("click", () => gantiView("rangkuman"));
 
 // ============================================================
-// PANEL KIRI: DOWNLOAD DATA (baca dari database, export ke Excel)
+// DOWNLOAD RAW DATA (baca dari database, export ke Excel)
 // ============================================================
-// PENTING: web ini TIDAK konek ke sipedas.pertanian.go.id sama sekali.
-// Data yang diambil di sini murni dari tabel Supabase (data_sbs/bst/
-// tbf/th), yang diisi lewat aplikasi desktop FetSipedas. Kolom Excel
-// hasil download SENGAJA dinamai persis seperti yang dicari
-// fitur_rekon.py di desktop (lihat excelCols di sph-config.js), supaya
-// file ini bisa langsung dipakai di menu "Pilih File Raw" desktop utk
-// membuat Excel rekon dinamis (dengan dropdown & grafik).
-//
-// CATATAN FILTER KABUPATEN: kolom "kab" di database berisi kode internal
-// dari API sipedas asli (mis. "01", "02", dst — beda dengan kode BPS
-// 4 digit). Kode ini TIDAK dipakai untuk filter di web karena rawan
-// berubah/tidak konsisten antar kabupaten. Sebagai gantinya, filter di
-// web ini pakai kolom "nama_kab" (nama kabupaten apa adanya dari hasil
-// sinkronisasi desktop), yang jauh lebih stabil dan mudah dicocokkan.
 $("btn-download").addEventListener("click", downloadData);
 
 function bukaModalDownload() {
@@ -423,7 +365,6 @@ $("modal-download").addEventListener("click", (e) => {
   if (e.target.id === "modal-download") tutupModalDownload();
 });
 
-// Ambil semua baris mentah 1 jenis SPH utk 1 kombinasi tahun+kab.
 async function ambilRowsMentah(jenis, tahun, kabNama) {
   const cfg = SPH_CONFIG[jenis];
   return await fetchAllRows((from, to) => {
@@ -438,8 +379,6 @@ async function ambilRowsMentah(jenis, tahun, kabNama) {
   });
 }
 
-// Susun baris Excel: kolom umum + kolom indikator dgn nama sesuai
-// excelCols (mengandung kata kunci yang dicari fitur_rekon.py).
 function buatRowsExcelMentah(cfg, rows) {
   return rows.map((r) => {
     const out = {
@@ -460,9 +399,6 @@ function buatRowsExcelMentah(cfg, rows) {
   });
 }
 
-// Tulis 1 sheet data mentah ke workbook dgn styling: header hijau + teks
-// putih bold, baris data selang-seling abu-abu (sama seperti sheet
-// Rangkuman). rowsExcel = array of object (hasil buatRowsExcelMentah).
 function tulisSheetDataMentah(wb, sheetName, rowsExcel) {
   if (!rowsExcel || rowsExcel.length === 0) return;
   const headers = Object.keys(rowsExcel[0]);
@@ -476,12 +412,10 @@ function tulisSheetDataMentah(wb, sheetName, rowsExcel) {
     if (c > range.e.c) range.e.c = c;
   };
 
-  // Baris 0: header kolom (hijau, teks putih bold)
   headers.forEach((h, c) => {
     setCell(0, c, xlCell(h, { bold: true, bgColor: XL_HIJAU_HEADER, color: XL_PUTIH, align: "left" }));
   });
 
-  // Baris data, selang-seling abu-abu tiap baris genap (0-indexed ganjil)
   rowsExcel.forEach((row, i) => {
     const stripeBg = i % 2 === 1 ? XL_ABU_STRIPE : undefined;
     headers.forEach((h, c) => {
@@ -503,15 +437,11 @@ function tulisSheetDataMentah(wb, sheetName, rowsExcel) {
 async function downloadData() {
   if (!state.profile) return;
 
-  const jenisPilihan = $("sel-jenis-download").value; // bisa "semua" atau salah satu jenis
+  const jenisPilihan = $("sel-jenis-download").value;
   const tahun = Number($("sel-tahun-download").value);
   const logBox = $("log-download");
   const btn = $("btn-download");
 
-  // Tentukan kabupaten yang mau diambil (berdasarkan nama_kab).
-  // kabNama === null artinya "semua kabupaten" (cuma boleh utk role prov;
-  // untuk kabkot selalu dikunci ke kabupatennya sendiri lewat kab_id
-  // profil -- lihat catatan di siapkanKabSelect()).
   let kabNama = null;
   if (state.profile.role === "kabkot") {
     kabNama = state.profile.kab_id;
@@ -542,9 +472,6 @@ async function downloadData() {
       }
 
       const rowsExcel = buatRowsExcelMentah(cfg, rows);
-      // Untuk download 1 jenis saja, nama sheet "Sheet1" (spy tetap
-      // kompatibel dgn menu "Pilih File Raw" di aplikasi desktop).
-      // Untuk "Semua SPH", tiap jenis dapat tab tersendiri.
       const sheetName = jenisPilihan === "semua" ? cfg.label : "Sheet1";
       tulisSheetDataMentah(wb, sheetName, rowsExcel);
       totalRows += rows.length;
@@ -565,9 +492,6 @@ async function downloadData() {
 
     XLSX.writeFile(wb, namaFile, { cellStyles: true });
 
-    // Catatan pemakaian di aplikasi desktop cuma relevan utk role "prov"
-    // (yang juga pegang aplikasi desktop utk bikin Excel rekon dinamis).
-    // Kabkot cukup tahu file-nya sudah jadi, tanpa embel-embel itu.
     const catatanDesktop = state.profile.role === "prov"
       ? `\nFile ini bisa langsung dipakai di aplikasi desktop FetSipedas ` +
         `(menu "3. Rekonsiliasi" → Pilih File Raw) untuk membuat Excel ` +
@@ -586,9 +510,7 @@ async function downloadData() {
   }
 }
 
-// Info "terakhir diperbarui" TIDAK lagi bergantung dropdown yang dipilih --
-// ditampilkan bergilir otomatis tiap 5 detik utk semua jenis SPH (tahun
-// berjalan sekarang).
+// Info "terakhir diperbarui" bergilir tiap 5 detik untuk semua jenis SPH.
 const JENIS_ROTASI_INFO = ["sbs", "tbf", "th", "bst"];
 let infoRotasiIdx = 0;
 let infoRotasiTimer = null;
@@ -673,11 +595,6 @@ async function siapkanKabSelect() {
   if (!state.profile) return;
   const selKab = $("sel-kab");
 
-  // kabkot: dikunci ke kabupatennya sendiri. Langsung pakai kab_id dari
-  // profil -- JANGAN tebak dari sample row seperti versi lama (kalau RLS
-  // longgar/bug, baris yang ke-ambil bisa kabupaten LAIN, pernah kejadian
-  // user Kota Pangkal Pinang malah dapat baris Bangka). kab_id di profil
-  // WAJIB persis sama dengan nama_kab di DB / id di DAFTAR_KAB_BABEL.
   if (state.profile.role === "kabkot") {
     const namakabDB = state.profile.kab_id;
     const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === namakabDB);
@@ -720,9 +637,6 @@ async function siapkanKomoditiSelect() {
   }
   const unik = Array.from(new Set(data.map((r) => r.namatanaman)));
 
-  // Urutkan sesuai referensi id_tanaman (Section 3, diupload role prov),
-  // persis seperti urutan_referensi di fitur_sbs.py (desktop). Komoditi
-  // yang belum ada di referensi ditaruh di paling akhir, alfabetis.
   const urutanMap = state.idTanamanUrutan[jenis] || {};
   unik.sort((a, b) => {
     const ua = urutanMap[normalisasiNamaTanaman(a)];
@@ -739,10 +653,8 @@ async function siapkanKomoditiSelect() {
 }
 
 // ============================================================
-// SECTION 3: REFERENSI ID TANAMAN (khusus role "prov")
+// REFERENSI ID TANAMAN (khusus role "prov")
 // ============================================================
-// Urutan baris di file Excel yang diupload -> kolom "urutan" di tabel
-// id_tanaman -> dipakai buat sort dropdown Komoditi di panel Rekon.
 async function muatReferensiIdTanaman() {
   let data = [];
   try {
@@ -755,7 +667,6 @@ async function muatReferensiIdTanaman() {
   const map = { sbs: {}, bst: {}, tbf: {}, th: {} };
   const namaAsli = { sbs: [], bst: [], tbf: [], th: {} };
 
-  // Kumpulkan per jenis, urut by urutan
   const perJenis = { sbs: [], bst: [], tbf: [], th: [] };
   if (data) {
     for (const row of data) {
@@ -764,7 +675,6 @@ async function muatReferensiIdTanaman() {
       if (perJenis[row.jenis]) perJenis[row.jenis].push({ nama: row.namatanaman, urutan: row.urutan });
     }
   }
-  // Urutkan nama asli sesuai urutan referensi
   for (const jenis of ["sbs", "bst", "tbf", "th"]) {
     perJenis[jenis].sort((a, b) => a.urutan - b.urutan);
     namaAsli[jenis] = perJenis[jenis].map((r) => r.nama);
@@ -815,7 +725,6 @@ async function uploadReferensiIdTanaman() {
 
       logBox.textContent = `Mengupload ${daftar.length} komoditi untuk jenis ${jenis.toUpperCase()}...`;
 
-      // Ganti semua referensi lama utk jenis ini (delete lalu insert ulang).
       const { error: errDel } = await supabase.from("id_tanaman").delete().eq("jenis", jenis);
       if (errDel) throw new Error(`Gagal hapus referensi lama (${jenis.toUpperCase()}): ${errDel.message}`);
 
@@ -832,8 +741,6 @@ async function uploadReferensiIdTanaman() {
     } else {
       logBox.textContent = `✓ Referensi berhasil diupdate!\n${hasil.join("\n")}`;
       await muatReferensiIdTanaman();
-      // Refresh dropdown komoditi yang sedang aktif (kalau ada) supaya
-      // urutan barunya langsung kepakai.
       if ($("sel-kab").value) await siapkanKomoditiSelect();
     }
   } catch (e) {
@@ -859,7 +766,6 @@ async function muatData() {
 
   mulaiLoadingDonut(area);
 
-  // Data kabupaten terpilih (utk tabel utama & grafik per kecamatan)
   let rowsKab;
   try {
     rowsKab = await fetchAllRows((from, to) =>
@@ -881,12 +787,6 @@ async function muatData() {
     return;
   }
 
-  // Data SEMUA kabupaten (komoditi & tahun sama) utk tabel & grafik
-  // "Rata-Rata ... menurut Kabupaten & Bulan/Triwulan" (persis spt desktop).
-  // RLS Supabase otomatis membatasi ini kalau role-nya kabkot.
-  // PENTING: query ini paling rawan kepotong batas baris karena tidak
-  // difilter per kabupaten (gabungan 7 kab x semua kecamatan x semua
-  // periode), jadi WAJIB lewat fetchAllRows juga.
   let rowsSemua = [];
   try {
     rowsSemua = await fetchAllRows((from, to) =>
@@ -908,10 +808,6 @@ async function muatData() {
 
 function nilaiFromRow(r, tab) {
   if (tab.single) return Number(r[tab.single]) || 0;
-  // PENTING (fix bug 100x): produksi disimpan Kg, luas/denom lain
-  // disimpan satuan aslinya (M2 utk luas, pohon utk BST). numerFactor
-  // dipakai supaya hasil provitas dalam Kuintal/Ha (atau Kg/Pohon utk
-  // BST) sama seperti aplikasi desktop.
   const numer = (Number(r[tab.numer]) || 0) * (tab.numerFactor ?? 1);
   const denom = Number(r[tab.denom]) || 0;
   return denom !== 0 ? numer / denom : 0;
@@ -925,9 +821,6 @@ function pivotKec(rows) {
   return Array.from(kecMap.values()).sort((a, b) => a.urut - b.urut);
 }
 
-// Tabel kecamatan x periode, dgn kolom Mean, highlight outlier
-// (IQR method persis spt desktop fitur_rekon.py: _iqr_bounds/_is_outlier,
-// nilai 0 diabaikan, minimal 4 nilai valid).
 function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerLabels, desimal = 2 }) {
   const semuaNilai = [];
   for (const k of kecRows) for (let p = 1; p <= nPeriode; p++) semuaNilai.push(matrix.get(`${k.kode}|${p}`) ?? 0);
@@ -977,12 +870,6 @@ function buatTabelKecPeriode({ judul, satuan, kecRows, matrix, nPeriode, headerL
   return blok;
 }
 
-// Tabel "Rata-Rata ... menurut Kabupaten & Bulan/Triwulan" — satu baris
-// per kabupaten (SEMUA 7 kab, bukan cuma yg dipilih), nilainya rata-rata
-// antar kecamatan per periode. Outlier dihitung GLOBAL dari semua cell
-// yang ada nilainya di tabel ini (semua kab x semua periode), nilai
-// null/kosong tidak ikut dihitung — sama seperti logic buatTabelKecPeriode,
-// dan pakai class warna "outlier" yang sama.
 function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabels, desimal = 2 }) {
   const labelAxis = cfg.periodeCol === "triwulan" ? "Triwulan" : "Bulan";
   const blok = document.createElement("div");
@@ -1007,8 +894,8 @@ function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabe
   table.innerHTML = `<thead><tr>${["Kabupaten", ...headerLabels].map((c) => `<th>${c}</th>`).join("")}</tr></thead>`;
   const tbody = document.createElement("tbody");
 
-  const perKabAvg = {}; // kab.id -> [rata2 per periode]
-  const semuaNilai = []; // gabungan semua nilai valid (non-null) di seluruh tabel ini
+  const perKabAvg = {};
+  const semuaNilai = [];
 
   for (const kab of DAFTAR_KAB_BABEL) {
     const rowsKabIni = rowsSemua.filter((r) => r.nama_kab === kab.id);
@@ -1030,7 +917,6 @@ function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabe
     perKabAvg[kab.id] = rataPerPeriode;
   }
 
-  // Bounds outlier dihitung sekali dari SEMUA cell (bukan per baris)
   const [lo, hi] = iqrBounds(semuaNilai);
 
   for (const kab of DAFTAR_KAB_BABEL) {
@@ -1104,13 +990,11 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
   state.chartInstances.forEach((c) => c.destroy());
   state.chartInstances = [];
 
-  // ---- Tabel utama (Provitas atau Harga) ----
   area.appendChild(buatTabelKecPeriode({
     judul: `${tab.label} — ${komoditi}`, satuan: tab.satuan,
     kecRows, matrix: matrixUtama, nPeriode, headerLabels, desimal: desimalUtama,
   }));
 
-  // ---- Tabel raw (khusus tab provitas: Produksi & Luas/Tanaman) ----
   if (!tab.single && tab.rawNumer) {
     const matrixNumer = new Map();
     for (const r of rowsKab) {
@@ -1134,7 +1018,6 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
     }));
   }
 
-  // ---- Tabel Rata-Rata menurut Kabupaten & Bulan/Triwulan (semua 7 kab) ----
   const { perKabAvg } = (() => {
     const r = buatTabelRata2PerKab({
       judul: `${tab.label} — ${komoditi}`, tab, cfg, rowsSemua, nPeriode, headerLabels, desimal: desimalUtama,
@@ -1143,7 +1026,6 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
     return r;
   })();
 
-  // ---- Grafik per Kecamatan (kabupaten terpilih) ----
   tambahkanGrafik(
     area,
     `Grafik ${tab.label} per Kecamatan — ${komoditi}`,
@@ -1152,13 +1034,12 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
       label: k.nama,
       data: Array.from({ length: nPeriode }, (_, idx) => {
         const v = matrixUtama.get(`${k.kode}|${idx + 1}`) ?? null;
-        return v === 0 ? null : v; // 0 = tidak ada data -> putus garis (spanGaps), bukan titik di angka 0
+        return v === 0 ? null : v;
       }),
     })),
     tab.satuan
   );
 
-  // ---- Grafik Rata-Rata per Kabupaten (semua 7 kab) ----
   tambahkanGrafik(
     area,
     `Grafik Rata-Rata ${tab.label} per Kabupaten — ${komoditi}`,
@@ -1170,9 +1051,6 @@ function renderRekon(cfg, rowsKab, rowsSemua, komoditi) {
   initScrollAtas(area);
 }
 
-// Sinkronkan scrollbar tipis di ATAS tiap tabel dengan area scroll asli
-// tabel itu (.tabel-scroll), supaya user bisa scroll ke kanan tanpa harus
-// scroll ke bawah dulu buat cari scrollbar di bawah tabel yang panjang.
 function initScrollAtas(container) {
   container.querySelectorAll(".tabel-blok").forEach((blok) => {
     const atas = blok.querySelector(".scroll-atas");
@@ -1189,14 +1067,6 @@ function initScrollAtas(container) {
 // ============================================================
 // PANEL KANAN — VIEW: RANGKUMAN DATA
 // ============================================================
-// Total produksi per komoditi (dijumlah dari semua kecamatan, dan
-// dijumlah dari semua kabupaten kalau dropdown Kabupaten = "semua"),
-// dipecah per bulan (khusus SBS) & triwulan, plus growth q-to-q dan
-// y-on-y. Growth dihitung dari "triwulan terakhir yang ada datanya":
-//   - q-to-q = (TW ini - TW sebelumnya) / TW sebelumnya
-//     (kalau TW ini = TW1, "TW sebelumnya" = TW4 tahun lalu)
-//   - y-on-y = (TW ini - TW yang sama tahun lalu) / TW yang sama tahun lalu
-// Makanya data tahun SEBELUMNYA juga selalu di-fetch di sini.
 const BULAN_NAMA = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
@@ -1235,7 +1105,6 @@ async function ambilRowsRangkuman(cfg, v, thn, kabPilihan, kecPilihan) {
     if (kabPilihan !== "semua") q = q.eq("nama_kab", kabPilihan);
     return q.range(from, to);
   });
-  // Filter kecamatan di sisi client (ejaan nama_kec bisa beda antar tabel -> dicocokkan tanpa spasi/kapital)
   if (kecPilihan && kecPilihan !== "semua") {
     const k = keyKecamatan(kecPilihan);
     rows = rows.filter((r) => keyKecamatan(r.nama_kec) === k);
@@ -1281,8 +1150,6 @@ function nilaiVarRow(r, v) {
   return s * (v.factor ?? 1);
 }
 
-// Agregasi baris mentah -> Map<namatanaman, obj>. Mode "avg" (harga):
-// rata-rata nilai non-nol; mode lain: dijumlah.
 function agregasiRangkuman(cfg, v, rows) {
   const map = new Map();
   for (const r of rows) {
@@ -1324,14 +1191,12 @@ function twTerakhirAdaData(twObj) {
   return null;
 }
 
-// Hitung satu nilai growth (persen): 0/0 -> null ("-"), dasar 0 -> +100, tujuan 0 -> -100
 function hitungSatuGrowth(valNow, valBase) {
   if (valBase !== 0) return ((valNow - valBase) / valBase) * 100;
   if (valNow !== 0) return 100;
   return null;
 }
 
-// Nilai kumulatif s.d. triwulan "upto" sesuai mode variabel
 function kumulRangkuman(o, upto, mode) {
   if (mode === "stok") return o.tw[upto] || 0;
   if (mode === "avg") {
@@ -1359,7 +1224,6 @@ function hitungBarisRangkuman(v, d, dLalu) {
   return { jumlah, qtoq, yoy, ctoc };
 }
 
-// Dipakai bersama oleh tampilan web & Excel
 function susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis) {
   const mapIni = agregasiRangkuman(cfg, v, rowsIni);
   const mapLalu = agregasiRangkuman(cfg, v, rowsLalu);
@@ -1380,7 +1244,7 @@ function susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis) {
   const baris = namaList.map((nama) => {
     const d = mapIni.get(nama);
     const dLalu = mapLalu.get(nama) || objRangkumanKosong();
-    const isGroup = isNamaGroup(nama); // "(Group)": tampil, tapi tidak ikut TOTAL
+    const isGroup = isNamaGroup(nama);
     if (!isGroup) {
       for (let b = 1; b <= 12; b++) totalBulan[b] += d.bulan[b] || 0;
       for (let t = 1; t <= 4; t++) { totalTw[t] += d.tw[t] || 0; totalTwLalu[t] += dLalu.tw[t] || 0; }
@@ -1388,7 +1252,6 @@ function susunDataRangkuman(cfg, v, rowsIni, rowsLalu, jenis) {
     return { nama, d, isGroup, hasil: hitungBarisRangkuman(v, d, dLalu) };
   });
 
-  // Harga (rata-rata) tidak punya TOTAL
   let total = null;
   if (v.mode !== "avg") {
     const dT = objRangkumanKosong(); dT.tw = totalTw; dT.bulan = totalBulan;
@@ -1459,20 +1322,14 @@ function renderRangkuman(cfg, v, rowsIni, rowsLalu, jenis, tahun, kabPilihan, ke
 }
 
 // ============================================================
-// DOWNLOAD RANGKUMAN EXCEL — semua jenis SPH dalam 1 file
+// DOWNLOAD RANGKUMAN EXCEL
 // ============================================================
-// Satu sheet per jenis SPH (SBS, BST, TBF, TH). Styling pakai
-// SheetJS cell-level format: header hijau (#1f9d6e), judul kuning
-// (#FFF176), growth positif hijau / negatif merah, baris total bold,
-// border tipis semua cell -- semirip mungkin dengan tampilan web.
-
-// Warna (ARGB tanpa #, format SheetJS)
-const XL_HIJAU_HEADER = "FF1f9d6e"; // header kolom (sama dgn --hijau-muda)
-const XL_KUNING_JUDUL = "FFFFF176"; // judul tabel (sama dgn .tabel-judul bg)
-const XL_HIJAU_GROWTH = "FF1f9d6e"; // growth positif
-const XL_MERAH_GROWTH = "FFc0392b"; // growth negatif (--merah)
-const XL_TOTAL_BG     = "FFe8ede9"; // baris total (--abu2)
-const XL_ABU_STRIPE   = "FFf8f8f8"; // selang-seling baris genap (sama dgn tr:nth-child(even) di web)
+const XL_HIJAU_HEADER = "FF1f9d6e";
+const XL_KUNING_JUDUL = "FFFFF176";
+const XL_HIJAU_GROWTH = "FF1f9d6e";
+const XL_MERAH_GROWTH = "FFc0392b";
+const XL_TOTAL_BG     = "FFe8ede9";
+const XL_ABU_STRIPE   = "FFf8f8f8";
 const XL_PUTIH        = "FFFFFFFF";
 
 function xlBorder() {
@@ -1481,7 +1338,6 @@ function xlBorder() {
 }
 
 function xlCell(v, opts = {}) {
-  // v bisa string/number/null. opts: bold, color (ARGB), bgColor (ARGB), align, numFmt
   const cell = { v: v ?? "", t: typeof v === "number" ? "n" : "s" };
   if (v === null || v === undefined) { cell.v = ""; cell.t = "s"; }
   const s = { border: xlBorder(), alignment: { horizontal: opts.align ?? "center", vertical: "center", wrapText: false } };
@@ -1496,7 +1352,6 @@ function xlCell(v, opts = {}) {
   return cell;
 }
 
-// Tulis 1 sheet tabulasi ke workbook
 function tulisSheetRangkuman(wb, sheetName, cfg, v, data, tahun, labelWilayah) {
   const pakaiBulan = cfg.periodeCol === "bulan";
   const BULAN_SINGKAT_XL = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
@@ -1553,7 +1408,6 @@ function tulisSheetRangkuman(wb, sheetName, cfg, v, data, tahun, labelWilayah) {
   XLSX.utils.book_append_sheet(wb, ws, sheetName.replace(/[:\\/?*[\]]/g, "").slice(0, 31));
 }
 
-// Download = tabulasi sesuai filter yang sedang dipilih (Jenis, Variabel, Tahun, Kab, Kec)
 async function downloadRangkumanExcel() {
   if (!state.profile) return;
   const jenis = $("sel-jenis-rangkuman").value;
@@ -1604,23 +1458,16 @@ $("sel-kab-anomali").addEventListener("change", muatAnomali);
 $("sel-tahun-anomali").addEventListener("change", muatAnomali);
 $("sel-triwulan-anomali").addEventListener("change", muatAnomali);
 
-// Nilai tahun aktif dari dropdown slicer: angka (mis. 2026), atau null
-// kalau user memilih "— Semua Tahun —" (value "semua").
 function tahunAnomaliAktif() {
   const v = $("sel-tahun-anomali").value;
   return v === "semua" || v === "" ? null : Number(v);
 }
 
-// Nilai triwulan aktif dari dropdown slicer: 1-4, atau null kalau
-// "— Semua Triwulan —" (value "semua").
 function triwulanAnomaliAktif() {
   const v = $("sel-triwulan-anomali").value;
   return v === "semua" || v === "" ? null : Number(v);
 }
 
-// Terapkan filter triwulan ke query konfirmasi_anomali utk 1 jenis SPH.
-// Kolom "bulan" di tabel ini berisi 1-12 utk SBS (jadi TW n = bulan
-// (n-1)*3+1 s.d. n*3), dan 1-4 utk BST/TBF/TH (langsung = triwulan).
 function modePeriodeAnomali() {
   return $("sel-jenis-anomali").value === "sbs" ? "bulan" : "tw";
 }
@@ -1638,7 +1485,6 @@ function terapkanFilterTriwulan(q, jenis) {
   return q.eq("bulan", tw);
 }
 
-// Versi utk query yang mencampur SEMUA jenis SPH sekaligus (Dashboard).
 function terapkanFilterTriwulanSemuaJenis(q) {
   const v = triwulanAnomaliAktif();
   if (v === null) return q;
@@ -1653,7 +1499,6 @@ function terapkanFilterTriwulanSemuaJenis(q) {
   return q.or(`${sbsCond},and(jenis.neq.sbs,bulan.eq.${tw})`);
 }
 
-// Isi ulang dropdown periode: SBS -> Bulan (Jan-Des), lainnya -> Triwulan.
 function isiFilterPeriodeAnomali() {
   const sel = $("sel-triwulan-anomali");
   const mode = modePeriodeAnomali();
@@ -1674,21 +1519,13 @@ function isiFilterPeriodeAnomali() {
 
 function isProv() { return state.profile?.role === "prov"; }
 
-// Akun provinsi "terbatas" (mis. sph1900): tampilannya SAMA seperti
-// provinsi biasa (role tetap "prov", bisa lihat semua kab, download
-// Excel, edit/approve baris yang sudah ada), TAPI tidak boleh menambah
-// baris baru & tidak boleh upload Excel massal di Konfirmasi Anomali,
-// serta tidak boleh upload Referensi ID Tanaman di panel Rekon (lihat
-// masukKeApp()). Ditandai lewat kolom profiles.akses_terbatas di DB.
+// Akun provinsi "terbatas" (mis. sph1900): tidak boleh tambah baris / upload massal / hapus.
 function isProvTerbatas() { return isProv() && state.profile?.akses_terbatas === true; }
 
-// Hitung TW saat ini berdasarkan bulan sekarang (dipakai sbg default
-// pilihan di popup "Tambah Baris", & fallback saat parsing periode_teks).
 function twSekarang() {
   return Math.ceil((new Date().getMonth() + 1) / 3);
 }
 
-// Daftar bulan dalam satu TW (1-indexed)
 function bulanDalamTw(tw) {
   const start = (tw - 1) * 3 + 1;
   return [start, start + 1, start + 2];
@@ -1699,27 +1536,17 @@ const NAMA_BULAN = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-// Buat label default periode: "TW2 2026"
 function labelPeriodeDefault() {
   return `TW${twSekarang()} ${new Date().getFullYear()}`;
 }
 
-// Ambil daftar komoditi dari state.idTanamanUrutan untuk jenis yg sedang dipilih
 function daftarKomoditiAnomali() {
   const jenis = $("sel-jenis-anomali").value;
-  const urutanMap = state.idTanamanUrutan[jenis] || {};
-  const entries = Object.entries(urutanMap); // [namaLower, urutan]
-  // Kembalikan nama asli (Title Case) dari referensi — kita simpan juga nama asli
-  // Karena idTanamanUrutan menyimpan nama lowercase sebagai key, kita butuh nama asli
-  // Ambil dari state.idTanamanNamaAsli yang akan kita isi saat muatReferensiIdTanaman
   const namaAsli = state.idTanamanNamaAsli?.[jenis] || [];
   return namaAsli;
 }
 
-// Ambil daftar nama kecamatan utk 1 kabupaten (dipakai dropdown Kecamatan
-// di Konfirmasi Anomali) -- diambil dari data_* yang sudah tersinkron
-// (gabungan semua jenis SPH, supaya lengkap), lalu di-cache per kab_id
-// biar tidak query ulang tiap render.
+// Daftar kecamatan 1 kabupaten (gabungan semua jenis SPH), di-cache per kab_id.
 async function muatKecamatanKab(kabId) {
   if (state.kecamatanPerKab[kabId]) return state.kecamatanPerKab[kabId];
   const tabel = ["data_sbs", "data_bst", "data_tbf", "data_th"];
@@ -1730,18 +1557,11 @@ async function muatKecamatanKab(kabId) {
         supabase.from(t).select("nama_kec, urutkec").eq("nama_kab", kabId).range(from, to)
       );
       semua = semua.concat(rows || []);
-    } catch (e) { /* tabel/kab ini mungkin belum ada data -- lewati */ }
+    } catch (e) { /* lewati */ }
   }
-  // PENTING: sumber data kadang menulis nama kecamatan yang SAMA dengan
-  // ejaan beda antar tabel/jenis SPH -- bukan cuma beda kapitalisasi
-  // (mis. "MENDO BARAT" vs "Mendo Barat"), tapi juga beda spasi (mis.
-  // "SUNGAILIAT" vs "Sungai Liat"). Daripada menebak ejaan mana yang
-  // "lebih rapi", ejaan yang dipakai utk ditampilkan adalah ejaan yang
-  // PALING SERING muncul di data asli (paling banyak barisnya di
-  // database) -- jadi benar-benar mengikuti data sebenarnya, bukan
-  // tebakan format.
+  // Ejaan yang ditampilkan = varian yang PALING SERING muncul di data asli.
   const keyKec = (n) => normalisasiNamaTanaman(n).replace(/\s+/g, "");
-  const grup = new Map(); // key -> { urutan, varian: Map<namaAsli, jumlah> }
+  const grup = new Map();
   for (const r of semua) {
     if (!r.nama_kec) continue;
     const key = keyKec(r.nama_kec);
@@ -1752,7 +1572,6 @@ async function muatKecamatanKab(kabId) {
   const list = Array.from(grup.values())
     .sort((a, b) => a.urutan - b.urutan)
     .map((g) => {
-      // Pilih varian ejaan dengan jumlah kemunculan TERBANYAK di data.
       let namaTerbanyak = null, jumlahTerbanyak = -1;
       for (const [nama, jumlah] of g.varian.entries()) {
         if (jumlah > jumlahTerbanyak) { namaTerbanyak = nama; jumlahTerbanyak = jumlah; }
@@ -1783,19 +1602,11 @@ function siapkanSlicerAnomali() {
   $("anomali-toolbar-prov").classList.toggle("hidden", !isProv());
   $("anomali-toolbar-kabkot").classList.toggle("hidden", isProv());
 
-  // Khusus prov "akses_terbatas" (mis. sph1900): sembunyikan tombol
-  // "+ Tambah Baris" & "Upload Excel" -- sisanya (download, hapus
-  // terpilih, hapus semua, dashboard, edit/approve baris yang sudah
-  // ada) tetap seperti provinsi biasa.
   if (isProv()) {
     const terbatas = isProvTerbatas();
     $("btn-buka-tambah-anomali").classList.toggle("hidden", terbatas);
     $("btn-buka-generate-anomali").classList.toggle("hidden", terbatas);
     $("lbl-upload-anomali").classList.toggle("hidden", terbatas);
-    // Akun prov terbatas (mis. sph1900) tidak boleh menghapus baris
-    // sama sekali -- baik satu-satu (X per baris, kolom checkboxnya
-    // sudah otomatis hilang lewat provFull di renderAnomali) maupun
-    // massal (Hapus Terpilih / Hapus Semua Anomali).
     $("btn-hapus-terpilih-anomali").classList.toggle("hidden", terbatas);
     $("btn-buka-hapus-anomali").classList.toggle("hidden", terbatas);
   }
@@ -1810,41 +1621,23 @@ async function muatAnomali() {
   const area = $("anomali-area");
   if (!kabId) return;
 
-  // Mode "semua kabupaten/kota": ambil data dari semua kab sekaligus,
-  // urutkan berdasarkan urutan KAB_ANOMALI_LIST (1901/Bangka dulu) lalu no_urut.
   const modeSemua = kabId === "semua";
 
-  // Nonaktifkan tombol "+ Tambah Baris" SEGERA begitu mode "Semua"
-  // dipilih -- jangan tunggu render selesai di renderAnomali()
-  // (sebelumnya tombol ini sempat kelihatan aktif/hijau selama proses
-  // loading masih berjalan, padahal begitu data selesai dimuat langsung
-  // didisable juga -- jadi lebih baik didisable dari awal).
   if (isProv() && !isProvTerbatas()) {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
-      const tahunSemua = tahunAnomaliAktif() === null;
       btnTambah.disabled = false;
       btnTambah.title = "";
     }
-    // Upload Excel TIDAK perlu didisable di mode "Semua Kabupaten/Kota"
-    // lagi -- kabupaten sekarang dibaca otomatis dari kolom
-    // "Kabupaten/Kota" di tiap baris file (lihat handler
-    // in-file-anomali), jadi aman diklik di mode manapun.
   }
 
   mulaiLoadingDonut(area);
 
-  const tahunAktif = tahunAnomaliAktif(); // null = "Semua Tahun"
+  const tahunAktif = tahunAnomaliAktif();
 
   let rows;
   try {
     if (modeSemua) {
-      // Ambil SEMUA kab SEKALIGUS secara paralel (Promise.all) --
-      // sebelumnya diambil satu-satu berurutan (7 kab gantian), yang
-      // bikin loading lama padahal masing2 query-nya sendiri cepat.
-      // Promise.all tetap mengembalikan array sesuai urutan INPUT
-      // (KAB_ANOMALI_LIST), bukan sesuai kab mana yang selesai duluan,
-      // jadi urutan hasil gabungan tetap sama seperti sebelumnya.
       const hasilPerKab = await Promise.all(
         KAB_ANOMALI_LIST.map((kab) =>
           fetchAllRows((from, to) => {
@@ -1871,12 +1664,8 @@ async function muatAnomali() {
   state.anomaliRows = rows || [];
 
   if (modeSemua) {
-    // Ambil daftar kecamatan semua kab SEKALIGUS (paralel juga, bukan
-    // berurutan) -- muatKecamatanKab sudah punya cache per kab_id
-    // sendiri, jadi aman dipanggil bareng-bareng.
     const daftarPerKab = await Promise.all(KAB_ANOMALI_LIST.map((kab) => muatKecamatanKab(kab)));
     const daftarKecGabung = daftarPerKab.flat();
-    // Deduplikasi berdasarkan key (case-insensitive, tanpa spasi)
     const seen = new Set();
     state.daftarKecAktif = daftarKecGabung.filter((n) => {
       const key = normalisasiNamaTanaman(n).replace(/\s+/g, "");
@@ -1892,28 +1681,18 @@ async function muatAnomali() {
 }
 
 // ---- Sorting tabel Konfirmasi Anomali ----
-// Kolom "bulan" WAJIB disort numerik dari nilai aslinya (1-12), BUKAN
-// dari label teksnya ("Jan","Feb",...) -- supaya urutannya benar
-// (Jan=1 s.d. Des=12), bukan alfabetis (Agu, Apr, Des, Feb, ...).
 const KOLOM_ANOMALI_SORTABLE = [
   { key: "no_urut", label: "No", tipe: "angka" },
   { key: "kecamatan", label: "Kecamatan", tipe: "teks" },
   { key: "nama_komoditi", label: "Nama Komoditi", tipe: "teks" },
   { key: "bulan", label: "Bulan", tipe: "angka" },
+  { key: "rincian", label: "Rincian", tipe: "teks" },
   { key: "kalimat_anomali", label: "Anomali", tipe: "teks" },
   { key: "tindak_lanjut", label: "Tindak Lanjut", tipe: "teks" },
-  { key: "konfirmasi_kabkot", label: null, tipe: "teks" }, // label kolom ini dinamis (nama kab), lihat renderAnomali
+  { key: "konfirmasi_kabkot", label: null, tipe: "teks" },
   { key: "approval_provinsi", label: "Approval", tipe: "teks" },
 ];
 
-// Sort DEFAULT (kolom "no_urut"): bukan cuma angka no_urut polos (yang
-// nilainya direset per-kabupaten jadi 1,1,1,... di database) -- tapi
-// compound-sort: Kabupaten (ikut urutan KAB_ANOMALI_LIST) -> Nama
-// Komoditi (ikut urutan referensi id_tanaman, sama seperti dropdown
-// Komoditi di panel Rekon/Tambah Baris) -> Bulan/Triwulan -> baru
-// no_urut asli sbg tie-breaker terakhir. Ini supaya urutan tampil di
-// mode "Semua Kabupaten/Kota" konsisten & rapi, bukan asal urutan hasil
-// fetch per kab.
 function bandingkanDefaultAnomali(a, b) {
   const jenis = $("sel-jenis-anomali").value;
   const urutanMap = state.idTanamanUrutan[jenis] || {};
@@ -1950,7 +1729,6 @@ function bandingkanAnomali(a, b, kolom, tipe, arah) {
   let va = a[kolom];
   let vb = b[kolom];
   if (tipe === "angka") {
-    // null/undefined selalu di bawah, terlepas arah sort
     const na = va === null || va === undefined;
     const nb = vb === null || vb === undefined;
     if (na && nb) return 0;
@@ -1973,23 +1751,15 @@ function renderAnomaliSorted() {
   renderAnomali(rowsSorted);
 }
 
-// Baca nilai kolom LANGSUNG dari isi yang sedang tampil di DOM (bukan dari
-// cache state.anomaliRows) -- supaya sort selalu akurat sesuai apa yang
-// benar-benar dilihat user saat ini, termasuk isian yang baru saja
-// diketik/dipilih tapi belum tentu "settle" di cache.
+// Baca nilai kolom langsung dari DOM (bukan cache) supaya sort akurat.
 function nilaiKolomDariBarisAnomali(tr, kolom) {
   const tds = tr.children;
   const adaChk = !!tr.querySelector(".chk-anomali");
   const adaKabKol = $("sel-kab-anomali")?.value === "semua";
-  // Urutan kolom sekarang: [checkbox?] [No] [Kabupaten?] [Kecamatan]
-  // [Komoditi] [Bulan] [Kalimat] [TindakLanjut] [Kabkot] [Approval] --
-  // "No" cuma digeser oleh checkbox (Kabupaten SEKARANG ada SETELAH
-  // No, bukan sebelumnya), sedangkan kolom2 lain (Kecamatan dst)
-  // digeser oleh checkbox DAN kolom Kabupaten.
+  // Urutan: [chk?] [No] [Kabupaten?] [Kecamatan] [Komoditi] [Bulan] [Rincian] [Kalimat] [TindakLanjut] [Kabkot] [Approval]
   const offsetNo = adaChk ? 1 : 0;
   const offset = offsetNo + (adaKabKol ? 1 : 0);
 
-  // Kolom Kabupaten (hanya mode semua) -- ambil dari dataset tr
   if (kolom === "_kab") {
     return tr.dataset.kabId || "";
   }
@@ -2014,19 +1784,23 @@ function nilaiKolomDariBarisAnomali(tr, kolom) {
       const idx = daftarPeriodeAnomali(jenisAktif).indexOf(txt);
       return idx >= 0 ? idx + 1 : null;
     }
+    case "rincian": {
+      const sel = tds[3 + offset]?.querySelector("select");
+      return (sel ? sel.value : tds[3 + offset]?.textContent || "").trim();
+    }
     case "kalimat_anomali": {
-      const teksEl = tds[3 + offset]?.querySelector(".kalimat-teks");
-      return (teksEl ? teksEl.textContent : tds[3 + offset]?.textContent || "").trim();
+      const teksEl = tds[4 + offset]?.querySelector(".kalimat-teks");
+      return (teksEl ? teksEl.textContent : tds[4 + offset]?.textContent || "").trim();
     }
     case "tindak_lanjut": {
-      const sel = tds[4 + offset]?.querySelector("select");
-      return (sel ? sel.value : tds[4 + offset]?.textContent || "").trim();
+      const sel = tds[5 + offset]?.querySelector("select");
+      return (sel ? sel.value : tds[5 + offset]?.textContent || "").trim();
     }
     case "konfirmasi_kabkot":
-      return (tds[5 + offset]?.textContent || "").trim();
+      return (tds[6 + offset]?.textContent || "").trim();
     case "approval_provinsi": {
-      const sel = tds[6 + offset]?.querySelector("select");
-      return (sel ? sel.value : tds[6 + offset]?.textContent || "").trim();
+      const sel = tds[7 + offset]?.querySelector("select");
+      return (sel ? sel.value : tds[7 + offset]?.textContent || "").trim();
     }
     default:
       return "";
@@ -2042,9 +1816,6 @@ function bandingkanNilaiAnomali(va, vb, tipe, arah) {
     if (nb) return -1;
     return arah === "asc" ? va - vb : vb - va;
   }
-  // Kolom "Kabupaten" (mode Semua): sort mengikuti urutan KODE kabupaten
-  // (1901 Bangka s.d. 1971 Kota Pangkal Pinang, lihat KAB_ANOMALI_LIST),
-  // BUKAN alfabetis -- supaya konsisten dgn urutan default tampilan.
   if (tipe === "kab") {
     const ia = KAB_ANOMALI_LIST.indexOf(va);
     const ib = KAB_ANOMALI_LIST.indexOf(vb);
@@ -2060,15 +1831,10 @@ function bandingkanNilaiAnomali(va, vb, tipe, arah) {
   return arah === "asc" ? cmp : -cmp;
 }
 
-// Urutkan ulang baris <tr> yang SUDAH ADA di tabel Anomali dengan
-// memindah posisinya di DOM (appendChild pada node yang sama memindah,
-// bukan membuat ulang) -- input/select/isi yang sedang tampil di layar
-// jadi TIDAK PERNAH ikut dibuat ulang atau hilang saat sort diklik.
 function urutkanBarisAnomaliDiDom(kolom, arah) {
   const tbody = document.querySelector("#anomali-area table.tabel-anomali tbody");
   if (!tbody) return;
   const info = KOLOM_ANOMALI_SORTABLE.find((k) => k.key === kolom);
-  // Kolom _kab tidak ada di KOLOM_ANOMALI_SORTABLE, tapi tipenya teks
   const tipe = info ? info.tipe : "teks";
   const trs = Array.from(tbody.children);
   trs.sort((ta, tb) => {
@@ -2078,10 +1844,6 @@ function urutkanBarisAnomaliDiDom(kolom, arah) {
   });
   trs.forEach((tr) => tbody.appendChild(tr));
 
-  // Mode "Semua Kabupaten/Kota": kolom No selalu jalan urut 1,2,3,...
-  // mengikuti urutan tampil SEKARANG (bukan no_urut asli dari database,
-  // yang direset per kabupaten jadi 1,1,1,...) -- jadi tiap kali baris
-  // dipindah urutannya lewat sort di atas, kolom No ikut dinomori ulang.
   if ($("sel-kab-anomali")?.value === "semua") {
     const trsBaru = Array.from(tbody.children);
     trsBaru.forEach((tr, idx) => {
@@ -2092,8 +1854,6 @@ function urutkanBarisAnomaliDiDom(kolom, arah) {
   }
 }
 
-// Update teks header (label + panah ▲▼) sesuai kolom/arah sort aktif,
-// tanpa menyentuh <tbody> sama sekali.
 function perbaruiLabelHeaderAnomali() {
   const table = document.querySelector("#anomali-area table.tabel-anomali");
   if (!table) return;
@@ -2101,7 +1861,7 @@ function perbaruiLabelHeaderAnomali() {
   const modeSemua = $("sel-kab-anomali")?.value === "semua";
   const jenisAktif = $("sel-jenis-anomali").value;
   const labelKonfirmasiKol = modeSemua ? "Konfirmasi Kabkot" : `Konfirmasi ${labelKabAnomaliAktif()}`;
-  const labelKolom = { _kab: "Kabupaten", no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
+  const labelKolom = { _kab: "Kabupaten", no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", rincian: "Rincian", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
   table.querySelectorAll("thead th.th-sortable").forEach((th) => {
     const key = th.dataset.kolom;
     const panah = kolomAktif === key ? (arahAktif === "asc" ? " ▲" : " ▼") : "";
@@ -2109,20 +1869,10 @@ function perbaruiLabelHeaderAnomali() {
   });
 }
 
-// Buat td dropdown Bulan -- SEKARANG bebas pilih semua 12 bulan (tidak
-// dibatasi ke TW tertentu lagi), dan sekarang jadi combobox ketik+cari
-// (bukan <select> native) -- alasan sama kayak Komoditi: <select> browser
-// suka kebuka ke ATAS kalau space-nya dianggap kurang, dan gak bisa
-// diketik cari. Nama bulan disingkat (Jan, Feb, dst) biar muat & gampang
-// diketik cari ("jan" langsung ketemu).
 const BULAN_SINGKAT_ANOMALI = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
 const TRIWULAN_LABEL_ANOMALI = ["Tw1", "Tw2", "Tw3", "Tw4"];
 
-// SPH-SBS pakai periode Bulan (1-12), sedangkan SPH-BST/TBF/TH pakai
-// Triwulan (1-4) -- sama seperti tabel data_* masing2 jenis. Kolom di
-// database "konfirmasi_anomali" TETAP bernama "bulan" (tidak perlu
-// migrasi skema), cuma nilainya diinterpretasikan beda tergantung jenis
-// SPH yang sedang aktif: 1-12 utk SBS, 1-4 utk BST/TBF/TH.
+// SBS = Bulan (1-12), BST/TBF/TH = Triwulan (1-4). Kolom DB tetap "bulan".
 function daftarPeriodeAnomali(jenis) {
   return jenis === "sbs" ? BULAN_SINGKAT_ANOMALI : TRIWULAN_LABEL_ANOMALI;
 }
@@ -2136,10 +1886,6 @@ function buatTdBulan(rowId, bulanSaatIni, editable, jenis) {
 
   if (!editable) {
     td.classList.add("terkunci");
-    // Sebelumnya kolom ini sengaja dikosongkan utk role kabkot -- itu
-    // keliru: kabkot tetap perlu MELIHAT bulan/triwulan anomali (cuma
-    // tidak boleh MENGEDIT-nya, makanya pakai class "terkunci" bukan
-    // combo).
     td.textContent = bulanSaatIni ? (daftarPeriode[bulanSaatIni - 1] || "") : "";
     return td;
   }
@@ -2158,10 +1904,6 @@ function buatTdBulan(rowId, bulanSaatIni, editable, jenis) {
   input.value = labelSaatIni;
 
   const list = document.createElement("div");
-  // Dropdown Bulan/Triwulan isinya cuma teks pendek (mis. "Jan", "Tw2"),
-  // jadi TIDAK perlu selebar dropdown Kecamatan/Komoditi -- dikasih
-  // class "combo-list-sempit" supaya ngepas ikut isinya saja (lihat
-  // style.css: .combo-list-sempit override min-width/max-width).
   list.className = "combo-list combo-list-sempit hidden";
 
   let labelTersimpan = labelSaatIni;
@@ -2222,7 +1964,7 @@ function buatTdBulan(rowId, bulanSaatIni, editable, jenis) {
       if (cocok) {
         pilihBulan(cocok);
       } else {
-        input.value = labelTersimpan; // gak cocok -> batal, balik ke nilai lama
+        input.value = labelTersimpan;
       }
     }, 150);
   });
@@ -2233,15 +1975,7 @@ function buatTdBulan(rowId, bulanSaatIni, editable, jenis) {
   return td;
 }
 
-// ============================================================
-// Combobox Komoditi -- input teks yang bisa diketik/dicari (bukan
-// <select> native lagi). Kenapa diganti: <select> native browser suka
-// buka ke ATAS kalau space di bawah dianggap kurang (perhitungan
-// browser, bukan kita yang atur), dan gak bisa diketik cari. Combobox
-// custom ini: dropdown-nya SELALU nempel di BAWAH input (position:
-// absolute, top:100%), bisa diketik buat filter list-nya, Enter buat
-// pilih hasil teratas, klik pilihan juga bisa.
-// ============================================================
+// Combobox Komoditi (ketik + cari, dropdown selalu di bawah input)
 function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   const td = document.createElement("td");
 
@@ -2253,11 +1987,9 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
 
   const namaList = daftarKomoditiAnomali();
 
-  // Fallback: kalau referensi id_tanaman belum diupload provinsi, tetap
-  // pakai sel biasa contenteditable (teks bebas).
   if (namaList.length === 0) {
     td.contentEditable = "true";
-    td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
+    td.spellcheck = false;
     td.textContent = nilaiSaatIni || "";
     td.addEventListener("blur", async () => {
       await simpanKolomAnomali(rowId, "nama_komoditi", td.textContent.trim());
@@ -2315,7 +2047,6 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
       if (opsiPertama) {
         pilihNama(opsiPertama.dataset.nama);
       } else {
-        // Ketikan gak cocok satupun -- balikin ke nilai tersimpan terakhir
         input.value = nilaiTersimpan;
         list.classList.add("hidden");
       }
@@ -2327,7 +2058,6 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
     }
   });
 
-  // mousedown (bukan click) supaya kepilih SEBELUM event blur di input nembak
   list.addEventListener("mousedown", (e) => {
     const opt = e.target.closest(".combo-option");
     if (!opt) return;
@@ -2336,9 +2066,6 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   });
 
   input.addEventListener("blur", () => {
-    // Kasih jeda dikit -- kalau blur ini dipicu klik opsi, mousedown di
-    // atas sudah keburu jalan duluan (preventDefault mencegah blur
-    // membatalkan klik). Kalau bukan, cocokkan ketikan bebas ke list.
     setTimeout(() => {
       list.classList.add("hidden");
       const ketikan = input.value.trim();
@@ -2347,7 +2074,6 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
       if (cocok) {
         pilihNama(cocok);
       } else {
-        // Gak cocok ke referensi manapun -- batalkan, balik ke nilai lama
         input.value = nilaiTersimpan;
       }
     }, 150);
@@ -2360,10 +2086,7 @@ function buatTdKomoditi(rowId, nilaiSaatIni, editable) {
   return td;
 }
 
-// Combobox Kecamatan -- pola sama persis dgn buatTdKomoditi/buatTdBulan:
-// ketik+cari, dropdown SELALU nempel di bawah input. Daftar kecamatan
-// otomatis mengikuti kabupaten yang sedang aktif di dropdown "sel-kab-anomali"
-// (diambil lewat muatKecamatanKab, lihat pemanggilnya di muatAnomali()).
+// Combobox Kecamatan (pola sama dengan Komoditi)
 function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
   const td = document.createElement("td");
 
@@ -2374,10 +2097,8 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
   }
 
   if (!daftarKec || daftarKec.length === 0) {
-    // Fallback: belum ada data kecamatan tersinkron utk kab ini -- pakai
-    // sel bebas ketik biasa.
     td.contentEditable = "true";
-    td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
+    td.spellcheck = false;
     td.textContent = nilaiSaatIni || "";
     td.addEventListener("blur", async () => {
       await simpanKolomAnomali(rowId, "kecamatan", td.textContent.trim());
@@ -2468,10 +2189,7 @@ function buatTdKecamatan(rowId, nilaiSaatIni, editable, daftarKec) {
   return td;
 }
 
-// Kolom Label (G/M) -- G = digenerate otomatis dari deteksi outlier,
-// M = ditambahkan manual (baik lewat "+ Tambah Baris" maupun upload
-// Excel). Read-only, cuma tampil utk provinsi PENUH (provFull), tidak
-// pernah tampil utk sph1900 (prov terbatas) atau kabkot.
+// Kolom Label (G/M): G = hasil Generate, M = manual. Read-only.
 function buatTdLabelSumber(sumber) {
   const td = document.createElement("td");
   td.className = "col-label terkunci";
@@ -2481,8 +2199,53 @@ function buatTdLabelSumber(sumber) {
   return td;
 }
 
-// Dropdown Tindak Lanjut -- cuma 2 pilihan (Wajar / Perbaikan), jadi
-// cukup <select> native biasa (bukan combobox ketik+cari).
+// ---- Kolom Rincian: dropdown pilihan sesuai jenis SPH + "Lainnya..." utk custom ----
+function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
+  const td = document.createElement("td");
+  td.classList.add("col-rincian");
+  if (!editable) {
+    td.classList.add("terkunci");
+    td.textContent = nilaiSaatIni || "";
+    return td;
+  }
+
+  const opsi = [...(OPSI_RINCIAN[jenis] || [])];
+  if (nilaiSaatIni && !opsi.includes(nilaiSaatIni)) opsi.push(nilaiSaatIni); // nilai custom lama tetap tampil
+
+  const sel = document.createElement("select");
+  sel.className = "sel-rincian";
+
+  const tambahOpsi = (value, label, sebelum) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    if (sebelum) sel.insertBefore(o, sebelum); else sel.appendChild(o);
+    return o;
+  };
+
+  tambahOpsi("", "Belum");
+  opsi.forEach((n) => tambahOpsi(n, n));
+  const optLain = tambahOpsi("__lain__", "Lainnya...");
+  sel.value = nilaiSaatIni || "";
+
+  let nilaiTersimpan = nilaiSaatIni || "";
+
+  sel.addEventListener("change", async () => {
+    if (sel.value === "__lain__") {
+      const teks = (prompt("Tulis rincian anomali (custom):") || "").trim();
+      if (!teks) { sel.value = nilaiTersimpan; return; }
+      const sudahAda = Array.from(sel.options).find((o) => o.value === teks);
+      if (!sudahAda) tambahOpsi(teks, teks, optLain);
+      sel.value = teks;
+    }
+    nilaiTersimpan = sel.value;
+    await simpanKolomAnomali(rowId, "rincian", sel.value);
+  });
+
+  td.appendChild(sel);
+  return td;
+}
+
 function buatTdTindakLanjut(rowId, nilaiSaatIni, editable) {
   const td = document.createElement("td");
   if (!editable) {
@@ -2503,9 +2266,6 @@ function buatTdTindakLanjut(rowId, nilaiSaatIni, editable) {
   return td;
 }
 
-// Label kabupaten yang sedang aktif di panel Anomali -- dipakai buat
-// judul kolom "Konfirmasi <Nama Kab>" biar otomatis ganti sesuai
-// kabupaten yang dipilih (atau kab_id sendiri kalau role kabkot).
 function labelKabAnomaliAktif() {
   const kabId = $("sel-kab-anomali").value;
   if (kabId === "semua") return "Semua Kabupaten/Kota";
@@ -2516,23 +2276,16 @@ function labelKabAnomaliAktif() {
 function renderAnomali(rows) {
   const area = $("anomali-area");
   const prov = isProv();
-  // provFull: provinsi dengan akses PENUH (bukan akun terbatas seperti
-  // sph1900) -- cuma provFull yang boleh centang baris & hapus baris
-  // satu-satu (kolom checkbox + tombol ✕).
   const provFull = prov && !isProvTerbatas();
-  // Tindak Lanjut & Konfirmasi: kabkot + super admin. Admin prov terbatas (sph1900) tidak bisa edit apa pun.
   const bisaIsiKonfirmasi = provFull || !prov;
   const kabIdAktif = $("sel-kab-anomali").value;
   const modeSemua = kabIdAktif === "semua";
   const labelKab = labelKabAnomaliAktif();
   const jenisAktif = $("sel-jenis-anomali").value;
 
-  // Mode semua kab / semua tahun: tombol Tambah Baris dinonaktifkan
-  // (harus pilih kab & tahun spesifik dulu)
   if (prov && !isProvTerbatas()) {
     const btnTambah = $("btn-buka-tambah-anomali");
     if (btnTambah) {
-      const tahunSemua = tahunAnomaliAktif() === null;
       btnTambah.disabled = false;
       btnTambah.title = "";
     }
@@ -2551,14 +2304,14 @@ function renderAnomali(rows) {
   tbl.className = "tabel-anomali";
 
   const { kolom: kolomAktif, arah: arahAktif } = state.anomaliSort;
-  // Kalau mode semua, judul kolom konfirmasi kabkot dibuat generik
   const labelKonfirmasiKol = modeSemua ? "Konfirmasi Kabkot" : `Konfirmasi ${labelKab}`;
-  const labelKolom = { no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
+  const labelKolom = { no_urut: "No", kecamatan: "Kecamatan", bulan: labelKolomPeriodeAnomali(jenisAktif), nama_komoditi: "Nama Komoditi", rincian: "Rincian", kalimat_anomali: "Anomali", tindak_lanjut: "Tindak Lanjut", konfirmasi_kabkot: labelKonfirmasiKol, approval_provinsi: "Approval" };
   const clsExtra = {
     no_urut: "col-no",
     kecamatan: "col-kecamatan",
     bulan: "col-bulan",
     nama_komoditi: "col-komoditi",
+    rincian: "col-rincian",
     kalimat_anomali: "col-anomali",
     tindak_lanjut: "col-tindak-lanjut",
     konfirmasi_kabkot: "col-kabkot",
@@ -2592,25 +2345,13 @@ function renderAnomali(rows) {
       } else {
         state.anomaliSort = { kolom: key, arah: "asc" };
       }
-      // PENTING: sort di sini TIDAK membangun ulang tabel dari cache
-      // (state.anomaliRows) -- itu penyebab data yang baru saja
-      // diketik/dipilih tapi belum "settle" di cache jadi kelihatan
-      // hilang. Sebagai gantinya, baris <tr> yang SUDAH ADA di layar
-      // cukup dipindah urutannya di DOM (tanpa dibuat ulang), dan
-      // nilai pembanding dibaca LANGSUNG dari isian yang sedang
-      // tampil di layar -- jadi apa pun yang sedang ditampilkan
-      // (termasuk yang belum sempat tersimpan) tidak pernah hilang.
       urutkanBarisAnomaliDiDom(state.anomaliSort.kolom, state.anomaliSort.arah);
       perbaruiLabelHeaderAnomali();
     });
     trHead.appendChild(th);
-    // Kolom "Kabupaten" ekstra di mode semua disisipkan TEPAT SETELAH
-    // header "No" (bukan sebelumnya lagi) -- supaya "No" tetap kolom
-    // paling kiri (setelah checkbox kalau ada), baru menyusul nama
-    // Kabupaten, baru Kecamatan dst.
     if (modeSemua && key === "no_urut") {
       const thKab = document.createElement("th");
-      thKab.className = "th-sortable col-kecamatan"; // pakai lebar kecamatan
+      thKab.className = "th-sortable col-kecamatan";
       thKab.textContent = "Kabupaten";
       thKab.dataset.kolom = "_kab";
       thKab.addEventListener("click", () => {
@@ -2643,13 +2384,9 @@ function renderAnomali(rows) {
   rows.forEach((r, idxBaris) => {
     const tr = document.createElement("tr");
     tr.dataset.id = r.id;
-    // Simpan kab_id di row supaya bisa dibaca saat sort kolom Kabupaten
     tr.dataset.kabId = r.kab_id || "";
     tr.dataset.tahun = r.tahun ?? "";
 
-    // Mode "Semua Kabupaten/Kota": kolom No ditampilkan jalan terus
-    // 1,2,3,... mengikuti urutan baris yang tampil -- BUKAN no_urut asli
-    // dari database (yang direset per kabupaten jadi 1,1,1,1,...).
     const nilaiNo = modeSemua ? (idxBaris + 1) : (r.no_urut ?? "");
     const tdNo = editableTd(nilaiNo, "no_urut", provFull && !modeSemua, true);
     tdNo.classList.add("col-no");
@@ -2662,6 +2399,8 @@ function renderAnomali(rows) {
 
     const tdBulan = buatTdBulan(r.id, r.bulan, provFull, jenisAktif);
     tdBulan.classList.add("td-bulan", "col-bulan");
+
+    const tdRincian = buatTdRincian(r.id, r.rincian ?? "", provFull, jenisAktif);
 
     const tdKalimat = buatTdKalimat(r, provFull);
     tdKalimat.classList.add("col-anomali");
@@ -2695,6 +2434,7 @@ function renderAnomali(rows) {
     tr.appendChild(tdKecamatan);
     tr.appendChild(tdKomoditi);
     tr.appendChild(tdBulan);
+    tr.appendChild(tdRincian);
     tr.appendChild(tdKalimat);
     tr.appendChild(tdTindakLanjut);
     tr.appendChild(tdKabkot);
@@ -2704,18 +2444,10 @@ function renderAnomali(rows) {
       tr.appendChild(buatTdLabelSumber(r.sumber));
     }
 
-    // Kolom Kabupaten (read-only) disisipkan TEPAT SETELAH sel "No"
-    // (tdNo) -- bukan paling depan lagi -- supaya No tetap kolom paling
-    // kiri (setelah checkbox kalau ada), baru menyusul nama Kabupaten.
     if (modeSemua) {
       const tdKabNama = document.createElement("td");
       tdKabNama.className = "col-kecamatan terkunci";
       const kabE = DAFTAR_KAB_BABEL.find((k) => k.id === r.kab_id);
-      // "Kab. " sengaja dibuang dari kolom ini saja (bukan dari
-      // DAFTAR_KAB_BABEL/dropdown Wilayah/dll) -- di tabel yang sudah
-      // punya header "Kabupaten" sendiri, prefix itu jadi berlebihan
-      // & bikin lebih makan tempat, cukup "Kota Pangkal Pinang" atau
-      // "Bangka Tengah" saja.
       tdKabNama.textContent = kabE ? kabE.nama.replace(/^Kab\.\s+/i, "") : (r.kab_id || "");
       tr.insertBefore(tdKabNama, tdNo.nextSibling);
     }
@@ -2746,14 +2478,8 @@ function renderAnomali(rows) {
   area.innerHTML = "";
   area.appendChild(tbl);
 }
-// (catatan: thead & tbody sengaja dirakit terpisah di atas -- thead pakai
-// header sortable dgn event click, tbody isi baris data seperti biasa)
 
-// ---- Sel "Anomali": teks kalimat (bisa diedit utk prov) + tombol "i"
-// (kalau baris ini punya rentang_wajar) yang memunculkan popup kecil di
-// sebelahnya berisi rentang wajar. Teks sengaja ada di <div> sendiri
-// (bukan di <td>) supaya teks tombol "i" tidak ikut tersimpan saat
-// kalimat diedit. ----
+// ---- Style tambahan (tombol "i" rentang wajar + kolom Rincian) ----
 (function pasangStyleInfoRentang() {
   const st = document.createElement("style");
   st.textContent = `
@@ -2775,9 +2501,15 @@ function renderAnomali(rows) {
       white-space: nowrap; color: var(--teks-gelap);
     }
     .popup-rentang strong { color: var(--hijau-tua); }
+    table.tabel-anomali td.col-rincian, table.tabel-anomali th.col-rincian {
+      width: 110px; min-width: 100px; text-align: center;
+    }
+    table.tabel-anomali select.sel-rincian {
+      width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;
+      font-family: inherit;
+    }
   `;
   document.head.appendChild(st);
-  // Klik di luar tombol "i" -> tutup popup yang sedang terbuka
   document.addEventListener("click", (e) => {
     if (e.target.closest(".info-rentang-wrap")) return;
     document.querySelectorAll(".popup-rentang").forEach((p) => p.remove());
@@ -2812,7 +2544,7 @@ function buatTdKalimat(r, editable) {
       e.stopPropagation();
       const ada = wrap.querySelector(".popup-rentang");
       document.querySelectorAll(".popup-rentang").forEach((p) => p.remove());
-      if (ada) return; // klik lagi = tutup
+      if (ada) return;
       const pop = document.createElement("div");
       pop.className = "popup-rentang";
       pop.innerHTML = `Rentang wajar: <strong></strong>`;
@@ -2833,7 +2565,7 @@ function editableTd(value, field, editable, isNumber) {
     return td;
   }
   td.contentEditable = "true";
-  td.spellcheck = false; // matikan garis merah spellcheck bawaan browser
+  td.spellcheck = false;
   td.addEventListener("blur", async () => {
     let v = td.textContent.trim();
     if (isNumber) v = Number(v) || 0;
@@ -2847,11 +2579,7 @@ async function simpanKolomAnomali(id, field, value) {
   try {
     const { error } = await supabase.from("konfirmasi_anomali").update({ [field]: value }).eq("id", id);
     if (error) throw error;
-    // PENTING: cache lokal (state.anomaliRows) dipakai ulang oleh sort
-    // (renderAnomaliSorted) TANPA fetch ulang ke DB -- kalau cache ini
-    // tidak disinkronkan tiap kali ada edit, klik sort akan me-render
-    // ulang dari data LAMA dan bikin isian yang baru diketik/dipilih
-    // kelihatan "hilang" (balik ke nilai sebelum diedit).
+    // Sinkronkan cache lokal supaya sort tidak me-render data lama.
     const row = state.anomaliRows.find((r) => r.id === id);
     if (row) row[field] = value;
   } catch (e) {
@@ -2860,9 +2588,6 @@ async function simpanKolomAnomali(id, field, value) {
 }
 
 async function hapusBarisAnomali(id, trEl) {
-  // Kasih indikator loading di tombol ✕ baris ini SENDIRI (bukan area
-  // penuh) -- supaya user yang klik tahu prosesnya sedang jalan, tanpa
-  // mengganggu baris lain yang mungkin lagi diedit.
   const btnHapus = trEl?.querySelector(".btn-hapus-baris");
   const chkBaris = trEl?.querySelector(".chk-anomali");
   if (btnHapus) {
@@ -2875,21 +2600,13 @@ async function hapusBarisAnomali(id, trEl) {
 
   try {
     const jenis = $("sel-jenis-anomali").value;
-    // Mode semua: kab_id diambil dari dataset baris ybs, bukan dari dropdown
     const kabIdDropdown = $("sel-kab-anomali").value;
     const kabId = kabIdDropdown === "semua" ? (trEl?.dataset.kabId || "") : kabIdDropdown;
-    // Tahun juga diambil dari dataset baris ybs (baris itu sendiri sudah
-    // pasti tahu tahunnya sendiri, terlepas dropdown Tahun sedang di
-    // posisi "Semua Tahun" atau tahun spesifik) -- supaya renumbering di
-    // bawah tetap benar per tahun yang sama dgn baris yang dihapus.
     const tahunBaris = trEl?.dataset.tahun ? Number(trEl.dataset.tahun) : null;
 
     const { error } = await supabase.from("konfirmasi_anomali").delete().eq("id", id);
     if (error) throw error;
 
-    // Renomori ulang No baris yang tersisa (kombinasi jenis+kab+tahun yg
-    // sama) biar urut rapi (1,2,3,...), gak ada yang "bolong" bekas baris
-    // yang dihapus.
     if (kabId) {
       const sisa = await fetchAllRows((from, to) => {
         let q = supabase.from("konfirmasi_anomali").select("id, no_urut").eq("jenis", jenis).eq("kab_id", kabId);
@@ -2906,7 +2623,6 @@ async function hapusBarisAnomali(id, trEl) {
 
     await muatAnomali();
   } catch (e) {
-    // Gagal -- kembalikan tombol ke kondisi semula supaya bisa dicoba lagi
     if (btnHapus) {
       btnHapus.disabled = false;
       btnHapus.classList.remove("loading");
@@ -2918,9 +2634,6 @@ async function hapusBarisAnomali(id, trEl) {
   }
 }
 
-// ---- Hapus Terpilih: hapus baris2 yg dicentang lewat checkbox di
-// samping kolom No (cuma utk baris pada kombinasi jenis+kab yg SEDANG
-// tampil, beda dgn "Hapus Semua Anomali" yg menghapus SEMUA data). ----
 $("btn-hapus-terpilih-anomali")?.addEventListener("click", hapusTerpilihAnomali);
 
 async function hapusTerpilihAnomali() {
@@ -2943,8 +2656,6 @@ async function hapusTerpilihAnomali() {
     const { error } = await supabase.from("konfirmasi_anomali").delete().in("id", ids);
     if (error) throw error;
 
-    // Renomori ulang No baris yang tersisa (kombinasi jenis+kab+tahun yg
-    // sama dgn yg sedang tampil), biar tetap urut 1,2,3,... tanpa bolong.
     const tahunAktif = tahunAnomaliAktif();
     const sisa = await fetchAllRows((from, to) => {
       let q = supabase.from("konfirmasi_anomali").select("id, no_urut").eq("jenis", jenis).eq("kab_id", kabId);
@@ -2958,7 +2669,7 @@ async function hapusTerpilihAnomali() {
       }
     }
 
-    await muatAnomali(); // muatAnomali() merender ulang tabel -- tombol otomatis balik ke teks/normal
+    await muatAnomali();
   } catch (e) {
     alert("Gagal menghapus baris terpilih: " + e.message);
     btn.disabled = false;
@@ -2966,13 +2677,10 @@ async function hapusTerpilihAnomali() {
   }
 }
 
-// ---- Tambah Baris: langsung insert baris baru pakai Triwulan & tahun
-// berjalan sekarang (twSekarang()/TAHUN_SEKARANG), tanpa perlu popup lagi --
-// kolom Periode sudah tidak ditampilkan di tabel, jadi gak perlu ditanya user. ----
+// ---- Tambah Baris ----
 $("btn-buka-tambah-anomali")?.addEventListener("click", () => {
   const kabId = $("sel-kab-anomali").value;
   if (kabId === "semua") {
-    // Mode "Semua Kabupaten/Kota": tanya dulu mau nambah baris di kabupaten mana
     $("sel-kab-tambah").innerHTML = KAB_ANOMALI_LIST.map((k) => {
       const e = DAFTAR_KAB_BABEL.find((d) => d.id === k);
       return `<option value="${k}">${e ? e.nama : k}</option>`;
@@ -2996,15 +2704,14 @@ $("btn-konfirmasi-tambah-anomali")?.addEventListener("click", async () => {
 
 async function tambahBarisAnomali(kabId) {
   const jenis = $("sel-jenis-anomali").value;
-  // Kalau dropdown Tahun = "Semua Tahun", pakai tahun berjalan.
   const tahun = tahunAnomaliAktif() ?? TAHUN_SEKARANG;
   const v = triwulanAnomaliAktif();
   let bulanVal, labelPeriode;
   if (jenis === "sbs") {
-    bulanVal = v ?? (new Date().getMonth() + 1);       // SBS = bulanan
+    bulanVal = v ?? (new Date().getMonth() + 1);
     labelPeriode = BULAN_SINGKAT_ANOMALI[bulanVal - 1];
   } else {
-    bulanVal = v ?? twSekarang();                      // BST/TBF/TH = triwulanan
+    bulanVal = v ?? twSekarang();
     labelPeriode = `Tw${bulanVal}`;
   }
 
@@ -3021,7 +2728,7 @@ async function tambahBarisAnomali(kabId) {
       no_urut: noUrutBaru,
       bulan: bulanVal,
       periode_teks: `${labelPeriode} ${tahun}`,
-      kecamatan: "", nama_komoditi: "", kalimat_anomali: "", tindak_lanjut: "",
+      kecamatan: "", nama_komoditi: "", rincian: "", kalimat_anomali: "", tindak_lanjut: "",
       sumber: "M",
     });
     if (error) throw error;
@@ -3031,12 +2738,7 @@ async function tambahBarisAnomali(kabId) {
   }
 }
 
-
-// ---- Popup Hapus Semua Anomali: SEKARANG benar2 GLOBAL -- menghapus
-// SEMUA baris dari SEMUA jenis SPH & SEMUA kabupaten/kota sekaligus
-// (bukan cuma kombinasi jenis+kab yg sedang difilter), sesuai maksud
-// tombolnya. Jumlah yg ditampilkan di popup juga dihitung dari seluruh
-// tabel, bukan cuma baris yg sedang tampil di layar. ----
+// ---- Popup Hapus Semua Anomali (GLOBAL: semua SPH & kabupaten) ----
 async function bukaModalHapusAnomali() {
   let totalSemua = 0;
   try {
@@ -3075,9 +2777,6 @@ async function hapusSemuaAnomali() {
   $("btn-backup-lalu-hapus-anomali").disabled = true;
   $("btn-batal-hapus-anomali").disabled = true;
   try {
-    // .not("id","is",null) = filter yang selalu cocok utk SEMUA baris
-    // (setiap baris pasti punya id/primary key bukan null) -- dipakai
-    // krn supabase-js mewajibkan minimal 1 filter utk perintah delete.
     const { error } = await supabase.from("konfirmasi_anomali").delete().not("id", "is", null);
     if (error) throw error;
     tutupModalHapusAnomali();
@@ -3099,9 +2798,6 @@ $("btn-backup-lalu-hapus-anomali")?.addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "⏳ Mengunduh backup...";
   try {
-    // Backup sekarang mencakup SEMUA kab & SEMUA jenis SPH (bukan cuma
-    // kombinasi yg sedang difilter), supaya sama cakupannya dgn yg akan
-    // dihapus oleh "Hapus Semua Anomali".
     const berhasil = await downloadBackupSemuaAnomali();
     if (berhasil) {
       await hapusSemuaAnomali();
@@ -3113,9 +2809,7 @@ $("btn-backup-lalu-hapus-anomali")?.addEventListener("click", async () => {
 });
 
 // ============================================================
-// GENERATE ANOMALI DARI OUTLIER (khusus prov PENUH / superadmin,
-// misal sphbps19 -- disembunyikan utk sph1900 & kabkot lewat
-// siapkanSlicerAnomali()).
+// GENERATE ANOMALI DARI OUTLIER (khusus prov PENUH)
 // ============================================================
 function bukaModalGenerateAnomali() {
   const kabId = $("sel-kab-anomali").value;
@@ -3138,16 +2832,6 @@ $("modal-generate-anomali")?.addEventListener("click", (e) => {
   if (e.target.id === "modal-generate-anomali") tutupModalGenerateAnomali();
 });
 
-// Deteksi outlier per komoditi (pakai tab provitas utama -- tab pertama
-// yang bukan tab "harga"/single), persis logic IQR yang dipakai tabel
-// Rekonsiliasi (iqrBounds/isOutlier di atas), lalu insert baris anomali
-// baru dgn sumber = "G" (Generated). Baris yang kombinasi
-// kecamatan+komoditi+periode-nya SUDAH ADA (utk jenis+kab ini) dilewati,
-// supaya tombol ini aman diklik berkali-kali tanpa bikin duplikat.
-// Samakan ejaan nama kecamatan ke bentuk KANONIK yang sama dgn yang
-// dipakai combobox manual (lihat muatKecamatanKab) -- supaya baris hasil
-// Generate Anomali TIDAK punya ejaan kecamatan yang beda2 (mis.
-// "MERAWANG" vs "Merawang") dibanding baris yang ditambah manual.
 function keyKecamatan(n) {
   return normalisasiNamaTanaman(n).replace(/\s+/g, "");
 }
@@ -3157,8 +2841,6 @@ function cariNamaKecKanonik(namaAsli, daftarKec) {
   return cocok || namaAsli;
 }
 
-// Helper generate anomali utk 1 kabupaten tertentu (dipanggil baik mode
-// single maupun mode "semua kabupaten/kota").
 async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
   const daftarKecKanonik = await muatKecamatanKab(kabId);
   const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kabId);
@@ -3171,6 +2853,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
 
     const cfg = SPH_CONFIG[jenis];
     const tabUtama = cfg.tabs.find((t) => !t.single) || cfg.tabs[0];
+    const rincianOtomatis = rincianDariTab(tabUtama); // mis. "Habis" / "Provitas"
 
     const rows = await fetchAllRows((from, to) =>
       supabase.from(cfg.table).select("*").eq("tahun", tahun).eq("nama_kab", kabId).range(from, to)
@@ -3181,24 +2864,24 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
     }
 
     const existing = await fetchAllRows((from, to) =>
-      supabase.from("konfirmasi_anomali").select("kecamatan, nama_komoditi, bulan")
+      supabase.from("konfirmasi_anomali").select("kecamatan, nama_komoditi, bulan, rincian")
         .eq("jenis", jenis).eq("kab_id", kabId).eq("tahun", tahun).range(from, to)
     );
-    const existSet = new Set(
-      (existing || []).map((e) => `${normalisasiNamaTanaman(e.kecamatan)}|${normalisasiNamaTanaman(e.nama_komoditi)}|${e.bulan}`)
-    );
+    // Dedup: kombinasi kec+komoditi+periode+rincian. Baris lama yang rinciannya
+    // masih kosong dianggap cocok utk rincian apa pun (supaya tidak dobel).
+    const keyDasar = (e) => `${normalisasiNamaTanaman(e.kecamatan)}|${normalisasiNamaTanaman(e.nama_komoditi)}|${e.bulan}`;
+    const existSet = new Set();
+    const existKosong = new Set();
+    for (const e of existing || []) {
+      if (e.rincian) existSet.add(`${keyDasar(e)}|${normalisasiNamaTanaman(e.rincian)}`);
+      else existKosong.add(keyDasar(e));
+    }
     let noUrut = existing?.length || 0;
 
     const perKomoditi = new Map();
     for (const r of rows) {
       const nama = r.namatanaman;
       if (!nama) continue;
-      // Baris "(Group)" (mis. "Cabai Besar (Group)", "Jeruk (Group)")
-      // adalah GABUNGAN/rekap dari komoditi lain yang sudah dihitung
-      // sendiri2 -- nilainya bukan data asli per komoditi, jadi dilewati
-      // dari pemindaian outlier (sama seperti di Rangkuman Data, lihat
-      // isNamaGroup()) supaya tidak menghasilkan anomali "palsu" dari
-      // angka gabungan.
       if (isNamaGroup(nama)) continue;
       if (!perKomoditi.has(nama)) perKomoditi.set(nama, []);
       perKomoditi.get(nama).push(r);
@@ -3226,8 +2909,9 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
         const namaKecAsli = kecInfo.get(kecKode) || kecKode;
         const namaKec = cariNamaKecKanonik(namaKecAsli, daftarKecKanonik);
 
-        const dupKey = `${normalisasiNamaTanaman(namaKec)}|${normalisasiNamaTanaman(komoditi)}|${per}`;
-        if (existSet.has(dupKey)) continue;
+        const dasar = `${normalisasiNamaTanaman(namaKec)}|${normalisasiNamaTanaman(komoditi)}|${per}`;
+        const dupKey = `${dasar}|${normalisasiNamaTanaman(rincianOtomatis)}`;
+        if (existSet.has(dupKey) || existKosong.has(dasar)) continue;
         existSet.add(dupKey);
 
         noUrut += 1;
@@ -3240,8 +2924,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
           kecamatan: namaKec,
           nama_komoditi: komoditi,
           bulan: per,
-          // Rentang wajar TIDAK ditulis di kalimat anomali, tapi disimpan
-          // di kolom rentang_wajar -> tampil lewat tombol "i" di tabel.
+          rincian: rincianOtomatis,
           kalimat_anomali:
             `Nilai ${tabUtama.label} sebesar ${fmt(v, 2)} ${tabUtama.satuan} terdeteksi di luar rentang wajar.`,
           rentang_wajar: `${fmt(lo, 2)} s.d. ${fmt(hi, 2)} ${tabUtama.satuan}`,
@@ -3288,9 +2971,6 @@ async function generateAnomaliDariOutlier() {
       ringkasan.push(...hasil.ringkasan);
     }
 
-    // Pesan singkat 1 baris saja (rincian per kab/jenis dicatat di
-    // console, bukan ditampilkan -- supaya kotak log tidak kepanjangan/
-    // kepotong dan tetap kelihatan penuh tanpa perlu geser layar).
     console.log("Generate Anomali:", ringkasan.join(" | "));
     log.textContent = totalDitambah > 0
       ? `✓ Selesai! ${totalDitambah} baris anomali baru ditambahkan (tahun ${tahun}).`
@@ -3298,7 +2978,7 @@ async function generateAnomaliDariOutlier() {
 
     if (totalDitambah > 0) {
       setTimeout(() => tutupModalGenerateAnomali(), 1200);
-      await muatAnomali(); // refresh tampilan list utk jenis+kab yg sedang aktif di dropdown
+      await muatAnomali();
     }
   } catch (e) {
     console.log("Generate Anomali gagal, ringkasan sejauh ini:", ringkasan.join(" | "));
@@ -3310,22 +2990,7 @@ async function generateAnomaliDariOutlier() {
 }
 $("btn-generate-anomali")?.addEventListener("click", generateAnomaliDariOutlier);
 
-// ---- Upload Excel (khusus prov): boleh berisi 1 s.d. 4 tab sheet
-// SEKALIGUS dalam satu file, satu tab per Jenis SPH -- nama tab
-// dicocokkan ke label Jenis SPH ("SPH-SBS"/"SPH-BST"/"SPH-TBF"/"SPH-TH")
-// ATAU singkatannya ("sbs"/"bst"/"tbf"/"th"), tidak peka besar/kecil
-// huruf. Tab yang namanya tidak dikenali otomatis DILEWATI -- jadi kalau
-// filenya cuma ada 1, 2, atau 3 tab yang valid, itu tetap jalan normal
-// (tidak wajib 4 tab lengkap). Jenis SPH tiap baris DITENTUKAN DARI NAMA
-// TAB-nya sendiri, BUKAN dari dropdown "Jenis SPH" yang sedang dipilih
-// di layar -- kolom Periode, No, Nama Komoditi, Kalimat Anomali.
-// Cocokkan label kabupaten (dari kolom "Kabupaten/Kota" di Excel, atau
-// dari nama sheet) balik ke id kabupaten internal (mis. "Kab. Bangka"
-// atau "Bangka" -> "Bangka"). Dipakai supaya Upload Excel bisa membaca
-// kabupaten LANGSUNG DARI ISI FILE -- bukan cuma dari dropdown Wilayah
-// yang sedang aktif di layar -- sehingga file hasil "Download Anomali
-// SPH" baik dari mode 1 kabupaten MAUPUN mode "Semua Kabupaten/Kota"
-// bisa diupload ulang tanpa peduli dropdown sedang di posisi mana.
+// Cocokkan label kabupaten (dari kolom "Kabupaten/Kota" di Excel) ke id internal.
 function cariKabIdDariLabel(label) {
   const s = String(label ?? "").trim().toLowerCase();
   if (!s) return null;
@@ -3335,27 +3000,17 @@ function cariKabIdDariLabel(label) {
   return entry ? entry.id : null;
 }
 
+// ---- Upload Excel (khusus prov penuh): 1-4 tab sheet, satu per Jenis SPH ----
 $("in-file-anomali")?.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  // kabDropdown dipakai HANYA sebagai fallback -- kalau baris di Excel
-  // tidak punya kolom "Kabupaten/Kota" yang bisa dikenali (mis. file
-  // free-form yang ditulis manual oleh user, bukan hasil Download
-  // Anomali SPH), kabupaten baris itu diambil dari dropdown ini. Kalau
-  // dropdown sedang "semua" DAN baris itu juga tidak punya info
-  // kabupaten, baris itu terpaksa dilewati (dilaporkan di ringkasan).
   const kabDropdown = $("sel-kab-anomali").value;
-  // tahunDropdown: fallback sama -- kalau baris Excel tidak punya kolom
-  // "Tahun" yang bisa dibaca (mis. file lama sebelum fitur Tahun ada),
-  // pakai tahun yang sedang aktif di dropdown slicer (asalkan bukan
-  // "Semua Tahun").
   const tahunDropdown = tahunAnomaliAktif();
 
   try {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
 
-    // key `${jenis}|${kabId}|${tahun}` -> array baris siap insert (no_urut belum diisi)
     const grupBaris = new Map();
     const sheetTakDikenali = [];
     let dilewatiTanpaKab = 0;
@@ -3366,10 +3021,6 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
       let jenis = JENIS_LIST_DASHBOARD.find(
         (j) => SPH_CONFIG[j].label.toLowerCase() === kunci || j === kunci
       );
-      // Nama sheet hasil download mode "Semua Kabupaten/Kota" berformat
-      // "<Label SPH>_<NamaKab>" (mis. "SPH-SBS_Kab.Bangka") -- kalau
-      // tidak cocok persis di atas, coba cocokkan bagian sebelum "_"
-      // saja.
       if (!jenis) {
         const prefix = kunci.split("_")[0];
         jenis = JENIS_LIST_DASHBOARD.find(
@@ -3383,11 +3034,6 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
       const daftarPeriodeSheet = daftarPeriodeAnomali(jenis);
 
       for (const row of rowsSheet) {
-        // Kolom periode di Excel: "Bulan" utk SPH-SBS, "Triwulan" utk
-        // SPH-BST/TBF/TH (fallback ke "Bulan" juga diterima kalau file
-        // lama masih pakai nama kolom itu). Bisa berisi angka (1-12 atau
-        // 1-4), nama bulan penuh ("Februari"), atau singkatan
-        // ("Feb"/"Tw2") -- coba semuanya.
         const periodeRaw = String(
           (jenisAdalahBulan ? (row["Bulan"] ?? row.bulan) : (row["Triwulan"] ?? row.triwulan ?? row["Bulan"] ?? row.bulan)) ?? ""
         ).trim();
@@ -3400,14 +3046,13 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
           } else if (jenisAdalahBulan) {
             const idxPenuh = NAMA_BULAN.findIndex((n) => n.toLowerCase() === periodeRaw.toLowerCase());
             const idxSingkat = daftarPeriodeSheet.findIndex((n) => n.toLowerCase() === periodeRaw.toLowerCase());
-            if (idxPenuh > 0) bulanVal = idxPenuh; // NAMA_BULAN index 0 = "" (kosong), jadi index = nomor bulan
+            if (idxPenuh > 0) bulanVal = idxPenuh;
             else if (idxSingkat >= 0) bulanVal = idxSingkat + 1;
           } else {
             const idxSingkat = daftarPeriodeSheet.findIndex((n) => n.toLowerCase() === periodeRaw.toLowerCase());
             if (idxSingkat >= 0) {
               bulanVal = idxSingkat + 1;
             } else {
-              // Fallback: teks campuran spt "Triwulan 2" -- ambil angka di dalamnya
               const angkaDalamTeks = Number((periodeRaw.match(/[0-9]+/) || [])[0]);
               if (!Number.isNaN(angkaDalamTeks) && angkaDalamTeks >= 1 && angkaDalamTeks <= maxVal) bulanVal = angkaDalamTeks;
             }
@@ -3418,29 +3063,21 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
 
         const kecamatan = String(row["Kecamatan"] ?? row.kecamatan ?? "").trim();
         const namaKomoditi = String(row["Nama Komoditi"] ?? row.nama_komoditi ?? "").trim();
+        const rincian = String(row["Rincian"] ?? row.rincian ?? "").trim();
         const kalimatAnomali = String(row["Kalimat Anomali"] ?? row.kalimat_anomali ?? "").trim();
-        if (!namaKomoditi && !kalimatAnomali) continue; // baris kosong -- lewati
+        if (!namaKomoditi && !kalimatAnomali) continue;
 
-        // Kabupaten baris ini: UTAMAKAN kolom "Kabupaten/Kota" di file
-        // (kalau ada & dikenali) -- ini yang bikin file hasil download
-        // "Semua Kabupaten/Kota" (per baris beda kabupaten) tetap benar
-        // saat diupload ulang, terlepas dropdown Wilayah lagi di posisi
-        // mana. Kalau kolom itu kosong/tidak dikenali, baru fallback ke
-        // dropdown yang sedang dipilih (asalkan bukan "semua").
         const kabDariKolom = cariKabIdDariLabel(row["Kabupaten/Kota"] ?? row.kabupaten ?? "");
         const kabId = kabDariKolom || (kabDropdown !== "semua" ? kabDropdown : null);
         if (!kabId) { dilewatiTanpaKab++; continue; }
 
-        // Tahun baris ini: UTAMAKAN kolom "Tahun" di file (sama alasannya
-        // dgn Kabupaten/Kota di atas) -- fallback ke dropdown Tahun yang
-        // sedang aktif (asalkan bukan "Semua Tahun").
         const tahunRaw = Number(row["Tahun"] ?? row.tahun ?? "");
         const tahunBaris = Number.isFinite(tahunRaw) && tahunRaw >= TAHUN_AWAL ? tahunRaw : tahunDropdown;
         if (!tahunBaris) { dilewatiTanpaTahun++; continue; }
 
         const baris = {
           jenis, kab_id: kabId, tahun: tahunBaris,
-          kecamatan, bulan: bulanVal, nama_komoditi: namaKomoditi,
+          kecamatan, bulan: bulanVal, nama_komoditi: namaKomoditi, rincian,
           kalimat_anomali: kalimatAnomali, tindak_lanjut: tindakVal,
           sumber: "M",
         };
@@ -3469,12 +3106,6 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
       return;
     }
 
-    // No urut baris baru disambung dari JUMLAH BARIS YANG SUDAH ADA di
-    // database utk tiap kombinasi jenis+kab+tahun (bukan asal pakai kolom
-    // "No" di Excel -- itu rawan bentrok/duplikat sama baris yang sudah
-    // ada). Dikelompokkan per jenis+kab+tahun (bukan per jenis saja)
-    // karena satu file sekarang bisa berisi baris dari BEBERAPA
-    // kabupaten/tahun sekaligus.
     let semuaBaris = [];
     const ringkasan = [];
     for (const [key, daftarBaris] of grupBaris.entries()) {
@@ -3498,8 +3129,6 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
     const { error } = await supabase.from("konfirmasi_anomali").insert(semuaBaris);
     if (error) throw error;
 
-    // Pesan singkat -- rincian per kab/jenis/tahun dicatat di console
-    // saja (F12) supaya alert tidak kepanjangan.
     console.log("Upload Anomali:", ringkasan.join(" | "));
     let pesan = `✓ Berhasil menambah ${semuaBaris.length} baris anomali.`;
     if (sheetTakDikenali.length > 0) pesan += ` (${sheetTakDikenali.length} tab dilewati, nama tak dikenali.)`;
@@ -3515,27 +3144,18 @@ $("in-file-anomali")?.addEventListener("change", async (e) => {
   }
 });
 
-// ---- Download Excel (prov & kabkot): SEMUA jenis SPH utk kabupaten yang
-// SEDANG DIPILIH di dropdown "sel-kab-anomali", masing2 jenis jadi tab
-// sheet sendiri (SBS/BST/TBF/TH) -- jadi 1x klik langsung dapat semuanya,
-// gak perlu gonta-ganti dropdown Jenis SPH & download berkali-kali. ----
+// ---- Download Excel anomali ----
 $("btn-download-anomali")?.addEventListener("click", downloadAnomaliExcel);
 $("btn-download-anomali-kabkot")?.addEventListener("click", downloadAnomaliExcel);
 
-// Kolom "ID" WAJIB ada di posisi pertama -- ini id unik (primary key) dari
-// database, dipakai sebagai kunci pencocokan saat kabkot mengupload balik
-// file ini utk mengisi "Konfirmasi Kabkot" (lihat uploadKonfirmasiKabkot()).
-// JANGAN diubah/dihapus user, dan JANGAN dipakai utk baris baru yang
-// ditambah manual di Excel (baris tanpa ID otomatis dilewati saat upload).
-const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval"];
-const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
+// Kolom "ID" WAJIB di posisi pertama (dipakai kabkot saat upload balik konfirmasi).
+const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Rincian", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval"];
+const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 14 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
 
-// Helper: tulis 1 sheet Anomali dari array rows (dipakai baik utk
-// download per-kab-semua-SPH maupun backup-semua-data-global).
 function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
   const ws = {};
   const headers = [...ANOMALI_HEADERS];
-  headers[5] = labelKolomPeriodeAnomali(jenis); // "Bulan" (SBS) atau "Triwulan" (BST/TBF/TH)
+  headers[5] = labelKolomPeriodeAnomali(jenis);
   const range = { s: { r: 0, c: 0 }, e: { r: rows.length, c: headers.length - 1 } };
   const setCell = (r, c, cell) => { ws[XLSX.utils.encode_cell({ r, c })] = cell; };
 
@@ -3548,7 +3168,7 @@ function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
     const kabEntryRow = DAFTAR_KAB_BABEL.find((k) => k.id === r.kab_id);
     const labelKabRow = kabEntryRow ? kabEntryRow.nama : (r.kab_id || "");
     const vals = [
-      r.id, r.no_urut, r.tahun ?? "", labelKabRow, r.kecamatan || "", bulanLabel, r.nama_komoditi, r.kalimat_anomali,
+      r.id, r.no_urut, r.tahun ?? "", labelKabRow, r.kecamatan || "", bulanLabel, r.nama_komoditi, r.rincian || "", r.kalimat_anomali,
       labelTindak(r.tindak_lanjut), r.konfirmasi_kabkot,
       r.approval_provinsi === "ya" ? "Ya" : r.approval_provinsi === "tidak" ? "Tidak" : "",
     ];
@@ -3557,7 +3177,6 @@ function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
 
   ws["!ref"] = XLSX.utils.encode_range(range);
   ws["!cols"] = ANOMALI_COL_WIDTHS;
-  // Nama sheet Excel maks 31 karakter & tidak boleh mengandung : \ / ? * [ ]
   const namaAman = sheetName.replace(/[:\\/?*[\]]/g, "").slice(0, 31);
   XLSX.utils.book_append_sheet(wb, ws, namaAman);
 }
@@ -3565,8 +3184,8 @@ function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
 async function downloadAnomaliExcel() {
   const kabId = $("sel-kab-anomali").value;
   const modeSemua = kabId === "semua";
-  const tahunAktif = tahunAnomaliAktif(); // null = semua tahun ikut terdownload
-  const twAktif = triwulanAnomaliAktif(); // null = semua triwulan ikut terdownload
+  const tahunAktif = tahunAnomaliAktif();
+  const twAktif = triwulanAnomaliAktif();
   const kabList = modeSemua ? KAB_ANOMALI_LIST : [kabId];
   const labelTahunFile = tahunAktif === null ? "SemuaTahun" : String(tahunAktif);
   const labelTwFile = twAktif === null ? "" : (modePeriodeAnomali() === "bulan" ? `_Bln${twAktif}` : `_TW${twAktif}`);
@@ -3586,8 +3205,6 @@ async function downloadAnomaliExcel() {
         });
         if (!rows || rows.length === 0) continue;
         adaData = true;
-        // Mode semua: nama sheet "SPH-SBS_Kab. Bangka" dst agar tiap kab+jenis beda tab
-        // Mode single: nama sheet cukup "SPH-SBS" dst (sama seperti sebelumnya)
         const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kab);
         const sheetName = modeSemua
           ? `${SPH_CONFIG[jenis].label}_${(kabEntry?.nama || kab).replace(/\s+/g, "")}`
@@ -3609,26 +3226,7 @@ async function downloadAnomaliExcel() {
   return true;
 }
 
-// ---- Upload Konfirmasi Excel (khusus kabkot): kebalikan dari download
-// di atas -- kabkot boleh kerja offline dulu di file "KonfirmasiAnomali_
-// ....xlsx" hasil download (isi kolom "Konfirmasi Kabkot" per tab sheet
-// jenis SPH: SPH-SBS/SPH-BST/SPH-TBF/SPH-TH), lalu upload balik file
-// yang sama di sini.
-//
-// Pencocokan baris PAKAI KOLOM "ID" (bukan posisi baris / No / nama
-// komoditi) -- ID ini id asli dari database yang sudah tertulis otomatis
-// tiap baris saat didownload (lihat tulisSheetAnomaliDariRows). Ini
-// supaya:
-//  - Baris tidak pernah "kepasang" ke anomali lain gara2 urutan Excel
-//    beda/ke-sort/ada baris disisipkan manual.
-//  - Kalau ternyata Provinsi SUDAH MENGHAPUS anomali itu duluan sebelum
-//    kabkot sempat upload, ID-nya otomatis tidak ketemu lagi di database
-//    -- baris itu dilewati begitu saja (aman, tidak nyasar mengisi
-//    konfirmasi ke anomali lain), dan dilaporkan di ringkasan akhir.
-// Baris yang ditambah manual di Excel tanpa isi kolom ID (mis. kabkot
-// nulis baris baru sendiri) juga otomatis dilewati -- fitur ini cuma
-// utk MENGISI KONFIRMASI baris yang sudah ada, bukan menambah baris baru
-// (utk itu tetap lewat tombol "+ Tambah Baris" / upload Provinsi).
+// ---- Upload Konfirmasi Excel (kabkot): pencocokan baris pakai kolom "ID" ----
 async function uploadKonfirmasiKabkotExcel(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -3640,21 +3238,17 @@ async function uploadKonfirmasiKabkotExcel(e) {
     let totalDicoba = 0, diupdate = 0, dilewati = 0;
 
     for (const sheetName of wb.SheetNames) {
-      // Cocokkan nama tab sheet ke jenis SPH -- terima baik nama tab
-      // persis label ("SPH-SBS") maupun singkat ("sbs", tidak peka
-      // besar/kecil huruf), supaya tetap jalan walau tabnya sempat
-      // diganti nama oleh user.
       const kunciSheet = sheetName.trim().toLowerCase();
       const jenis = JENIS_LIST_DASHBOARD.find(
         (j) => SPH_CONFIG[j].label.toLowerCase() === kunciSheet || j === kunciSheet
       );
-      if (!jenis) continue; // tab tidak dikenali -> lewati, bukan tab SPH
+      if (!jenis) continue;
 
       const rowsSheet = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "" });
       for (const row of rowsSheet) {
         const idRaw = row["ID"] ?? row["Id"] ?? row.id ?? "";
         const id = Number(idRaw);
-        if (!idRaw || Number.isNaN(id)) continue; // baris tanpa ID (baris baru manual) -> lewati
+        if (!idRaw || Number.isNaN(id)) continue;
 
         totalDicoba++;
         const konfirmasiBaru = String(row["Konfirmasi Kabkot"] ?? "").trim();
@@ -3666,7 +3260,7 @@ async function uploadKonfirmasiKabkotExcel(e) {
           .select("id");
 
         if (error || !data || data.length === 0) {
-          dilewati++; // ID tidak ketemu (kemungkinan sudah dihapus Provinsi) atau gagal
+          dilewati++;
           continue;
         }
         diupdate++;
@@ -3677,7 +3271,7 @@ async function uploadKonfirmasiKabkotExcel(e) {
       alert(
         "Tidak ada baris dengan kolom ID yang bisa diproses.\n" +
         "Pastikan file yang diupload adalah hasil download dari tombol " +
-        "\"Download Excel (Semua SPH)\" (kolom ID jangan dihapus/diubah)."
+        "\"Download Anomali SPH\" (kolom ID jangan dihapus/diubah)."
       );
       return;
     }
@@ -3697,9 +3291,7 @@ async function uploadKonfirmasiKabkotExcel(e) {
 }
 $("in-file-konfirmasi-kabkot")?.addEventListener("change", uploadKonfirmasiKabkotExcel);
 
-// ---- Backup Global (dipakai sebelum "Hapus Semua Anomali"): mengambil
-// SEMUA baris dari SEMUA jenis SPH & SEMUA kabupaten sekaligus, dikelompokkan
-// jadi 1 sheet per kombinasi jenis+kab (mis. "SPH-SBS_Kab. Bangka"). ----
+// ---- Backup Global (sebelum "Hapus Semua Anomali") ----
 async function downloadBackupSemuaAnomali() {
   let rows;
   try {
@@ -3719,7 +3311,7 @@ async function downloadBackupSemuaAnomali() {
     return false;
   }
 
-  const grup = new Map(); // key `${jenis}|${kab_id}` -> rows[]
+  const grup = new Map();
   for (const r of rows) {
     const key = `${r.jenis}|${r.kab_id}`;
     if (!grup.has(key)) grup.set(key, []);
@@ -3741,15 +3333,10 @@ async function downloadBackupSemuaAnomali() {
 }
 
 // ============================================================
-// DASHBOARD ANOMALI — ringkasan semua Jenis SPH x Kabupaten
-// Tampil INLINE menggantikan tabel list Konfirmasi Anomali (bukan
-// popup), dengan tombol "Kembali" utk balik ke tampilan list biasa.
+// DASHBOARD ANOMALI
 // ============================================================
 const JENIS_LIST_DASHBOARD = ["sbs", "bst", "tbf", "th"];
 
-// Tombol "Dashboard Anomali" & "Kembali ke Daftar Anomali" sekarang jadi
-// SATU tombol yang sama (bukan tombol terpisah lagi) -- teks & warnanya
-// berubah tergantung lagi di tampilan mana (list biasa vs dashboard).
 function perbaruiTombolDashboardAnomali() {
   const aktif = !!state.dashboardAnomaliAktif;
   document.querySelectorAll("#btn-buka-dashboard-anomali, #btn-buka-dashboard-anomali-kabkot").forEach((btn) => {
@@ -3760,7 +3347,7 @@ function perbaruiTombolDashboardAnomali() {
 
 async function toggleDashboardAnomali() {
   if (state.dashboardAnomaliAktif) {
-    await muatAnomali(); // muatAnomali() sendiri yg reset state & tombol
+    await muatAnomali();
   } else {
     await bukaDashboardAnomali();
   }
@@ -3773,9 +3360,8 @@ async function bukaDashboardAnomali() {
   const area = $("anomali-area");
   mulaiLoadingDonut(area, "Memuat data dashboard...");
 
-  // Provinsi: lihat semua kab. Kabkot: cuma kabupatennya sendiri.
   const kabList = isProv() ? KAB_ANOMALI_LIST : [state.profile.kab_id];
-  const tahunAktif = tahunAnomaliAktif(); // null = semua tahun ikut dashboard
+  const tahunAktif = tahunAnomaliAktif();
 
   let rows;
   try {
@@ -3798,10 +3384,6 @@ async function bukaDashboardAnomali() {
   renderDashboardAnomali(rows, kabList, tahunAktif, triwulanAnomaliAktif());
 }
 
-// Format "count (pct%)" -- ditulis SATU BARIS (persen di dalam kurung
-// di samping angka, bukan di baris bawahnya) supaya baris tabel lebih
-// ngepas/rapat. Kalau total 0, persentase ditampilkan "-" supaya tidak
-// muncul NaN%.
 function fmtCountPct(count, total) {
   const pctVal = total > 0 ? Math.round((count / total) * 100) : 0;
   const warna = pctVal >= 100 ? "color:var(--hijau-muda);" : "color:var(--merah);";
@@ -3811,7 +3393,7 @@ function fmtCountPct(count, total) {
 function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
   const area = $("anomali-area");
 
-  const map = new Map(); // key `${kab}|${jenis}` -> stats
+  const map = new Map();
   for (const kab of kabList) {
     for (const jenis of JENIS_LIST_DASHBOARD) {
       map.set(`${kab}|${jenis}`, {
@@ -3835,24 +3417,19 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
 
   const totalRow = { total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 };
 
-  // ---- Susun baris per kab (kumpulkan dulu semua baris jenis yg
-  // datanya > 0, supaya tahu berapa rowspan utk sel Kabupaten) ----
   let bodyRows = "";
-  let grupKeIdx = 0; // dinaikkan tiap pindah ke kabupaten baru -- dipakai utk selang-seling warna PER KELOMPOK kab (bukan per baris), biar batas antar kabupaten kelihatan jelas
+  let grupKeIdx = 0;
 
   for (const kab of kabList) {
     const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kab);
     const labelKab = kabEntry ? kabEntry.nama : kab;
 
     const jenisTerisi = JENIS_LIST_DASHBOARD.filter((jenis) => map.get(`${kab}|${jenis}`).total > 0);
-    if (jenisTerisi.length === 0) continue; // kab ini belum ada anomali sama sekali di semua SPH
+    if (jenisTerisi.length === 0) continue;
 
     const clsGrup = grupKeIdx % 2 === 1 ? " grup-abu" : "";
     grupKeIdx++;
 
-    // Akumulator subtotal KHUSUS kabupaten ini (direset tiap ganti kab),
-    // supaya ada baris "Subtotal <Nama Kab>" di bawah baris2 SPH-nya --
-    // sebelumnya cuma ada 1 baris TOTAL provinsi di paling bawah.
     const subTotalKab = { total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 };
 
     jenisTerisi.forEach((jenis, idx) => {
@@ -3872,17 +3449,10 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
       subTotalKab.approvalTidak += s.approvalTidak;
       subTotalKab.approvalBelum += s.approvalBelum;
 
-      // Sel Kabupaten cuma dicetak di baris pertama kab ini, dgn
-      // rowspan sepanjang jumlah baris SPH yang terisi utk kab tsb
-      // (mail-merge) -- baris berikutnya tidak perlu <td> kab lagi.
       const tdKab = idx === 0
         ? `<td class="nama" rowspan="${jenisTerisi.length}">${labelKab}</td>`
         : "";
 
-      // "baris-mulai-kab" dikasih ke baris PERTAMA tiap kabupaten --
-      // dipakai buat garis atas lebih tebal, jadi batas antar kabupaten
-      // kelihatan tegas walau warnanya kebetulan sama (kab ganjil vs
-      // ganjil berikutnya).
       const clsMulai = idx === 0 ? " baris-mulai-kab" : "";
 
       bodyRows += `<tr class="${clsGrup}${clsMulai}">
@@ -3897,9 +3467,6 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
       </tr>`;
     });
 
-    // Baris Subtotal per kabupaten -- cuma ditampilkan kalau kab ini
-    // punya lebih dari 1 jenis SPH terisi (kalau cuma 1 jenis, subtotal
-    // = sama persis dgn baris SPH itu, jadi tidak perlu diulang).
     if (jenisTerisi.length > 1) {
       bodyRows += `<tr class="${clsGrup} baris-subtotal-kab">
         <td colspan="2">Subtotal ${labelKab}</td>
