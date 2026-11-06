@@ -2239,7 +2239,13 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
     return o;
   };
 
-  tambahOpsi("", "— Pilih —");
+  // Opsi kosong HANYA muncul sbg placeholder utk baris yang rinciannya belum
+  // diisi, dan tidak bisa dipilih lagi dari daftar (hidden + disabled).
+  if (!nilaiSaatIni) {
+    const optKosong = tambahOpsi("", "— Pilih —");
+    optKosong.hidden = true;
+    optKosong.disabled = true;
+  }
   opsi.forEach((n) => tambahOpsi(n, n));
   const optLain = tambahOpsi("__lain__", "Lainnya...");
   sel.value = nilaiSaatIni || "";
@@ -2518,7 +2524,7 @@ function renderAnomali(rows) {
     }
     .popup-rentang strong { color: var(--hijau-tua); }
     table.tabel-anomali td.col-rincian, table.tabel-anomali th.col-rincian {
-      width: 110px; min-width: 100px; text-align: center;
+      width: 140px; min-width: 130px; text-align: center;
     }
     table.tabel-dashboard-anomali tr.baris-mulai-kec td { border-top: 1px solid var(--hijau-muda); }
     table.tabel-anomali select.sel-rincian {
