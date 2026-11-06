@@ -335,6 +335,11 @@ $("btn-logout").addEventListener("click", async () => {
 // TOGGLE PANEL KANAN
 // ============================================================
 function gantiView(view) {
+  // Simpan posisi scroll Konfirmasi Anomali sebelum pindah menu.
+  const areaAnomali = $("anomali-area");
+  if (!$("view-anomali").classList.contains("hidden") && view !== "anomali") {
+    state.scrollAnomali = { top: areaAnomali.scrollTop, left: areaAnomali.scrollLeft };
+  }
   $("view-rekon").classList.toggle("hidden", view !== "rekon");
   $("view-rangkuman").classList.toggle("hidden", view !== "rangkuman");
   $("view-anomali").classList.toggle("hidden", view !== "anomali");
@@ -342,7 +347,12 @@ function gantiView(view) {
   $("btn-view-anomali").classList.toggle("aktif", view === "anomali");
   $("btn-view-rangkuman").classList.toggle("aktif", view === "rangkuman");
   $("toggle-aksi-rekon").classList.toggle("hidden", view !== "rekon");
-  if (view === "anomali" && state.profile) muatAnomali();
+  if (view === "anomali" && state.profile) {
+    const pos = state.scrollAnomali;
+    muatAnomali().then(() => {
+      if (pos) { areaAnomali.scrollTop = pos.top; areaAnomali.scrollLeft = pos.left; }
+    });
+  }
 }
 $("btn-view-rekon").addEventListener("click", () => gantiView("rekon"));
 $("btn-view-anomali").addEventListener("click", () => gantiView("anomali"));
