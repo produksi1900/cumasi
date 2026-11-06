@@ -982,6 +982,11 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
         pointStyle: STYLE_TITIK[i % STYLE_TITIK.length],
         tipe: s.tipe, key: s.key, kabId: s.kabId,
         warnaAsli: PALET_WARNA[i % PALET_WARNA.length],
+        // Scriptable: dievaluasi ulang tiap update, jadi bintik ikut abu-abu.
+        pointBackgroundColor: (c) => c.dataset.warnaSekarang || c.dataset.warnaAsli,
+        pointBorderColor: (c) => c.dataset.warnaSekarang || c.dataset.warnaAsli,
+        pointHoverBackgroundColor: (c) => c.dataset.warnaSekarang || c.dataset.warnaAsli,
+        pointHoverBorderColor: (c) => c.dataset.warnaSekarang || c.dataset.warnaAsli,
       })),
     },
     options: {
@@ -989,7 +994,7 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
       plugins: {
         legend: {
           position: "right",
-          labels: { boxWidth: 12, font: { size: 10 } },
+          labels: { boxWidth: 12, font: { size: 10 }, sort: (x, y) => x.datasetIndex - y.datasetIndex },
           // Klik legend = fokus ke garis itu (bukan sembunyikan); klik lagi = reset.
           onClick: (e, item, legend) => {
             const ds = legend.chart.data.datasets[item.datasetIndex];
@@ -1025,15 +1030,12 @@ function terapkanFokusGrafik() {
       const warna = aktif ? ds.warnaAsli : "rgba(190,190,190,0.4)";
       ds.borderColor = warna;
       ds.backgroundColor = warna;
-      ds.pointBackgroundColor = warna;
-      ds.pointBorderColor = warna;
-      ds.pointHoverBackgroundColor = warna;
-      ds.pointHoverBorderColor = warna;
+      ds.warnaSekarang = warna;
       ds.borderWidth = f && aktif ? 3.5 : f ? 1.5 : 2.5;
       ds.pointRadius = f && !aktif ? 2 : 4;
       ds.order = aktif ? 0 : 2;
     });
-    chart.update("none");
+    chart.update();
   }
 }
 
