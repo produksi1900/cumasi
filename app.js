@@ -993,9 +993,14 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
           // Klik legend = fokus ke garis itu (bukan sembunyikan); klik lagi = reset.
           onClick: (e, item, legend) => {
             const ds = legend.chart.data.datasets[item.datasetIndex];
+            if (!state.fokusGrafik) state.fokusGrafik = { kec: new Map(), kab: new Set() };
             const f = state.fokusGrafik;
-            if (f && f.tipe === ds.tipe && f.key === ds.key) state.fokusGrafik = null;
-            else state.fokusGrafik = { tipe: ds.tipe, key: ds.key, kabId: ds.kabId };
+            if (ds.tipe === "kec") {
+              if (f.kec.has(ds.key)) f.kec.delete(ds.key); else f.kec.set(ds.key, ds.kabId);
+            } else {
+              if (f.kab.has(ds.key)) f.kab.delete(ds.key); else f.kab.add(ds.key);
+            }
+            if (f.kec.size === 0 && f.kab.size === 0) state.fokusGrafik = null;
             terapkanFokusGrafik();
           },
         },
@@ -1009,16 +1014,21 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
 // Fokus tersinkron antar semua grafik: kec -> kabnya, kab -> kec2 di kab itu.
 function terapkanFokusGrafik() {
   const f = state.fokusGrafik;
+  const kabDariKec = f ? new Set(f.kec.values()) : null;
   for (const chart of state.chartInstances) {
     chart.data.datasets.forEach((ds) => {
       let aktif = true;
       if (f) {
-        if (ds.tipe === f.tipe) aktif = ds.key === f.key;
-        else aktif = ds.kabId === f.kabId;
+        if (ds.tipe === "kec") aktif = f.kec.has(ds.key) || f.kab.has(ds.kabId);
+        else aktif = f.kab.has(ds.key) || kabDariKec.has(ds.key);
       }
       const warna = aktif ? ds.warnaAsli : "rgba(190,190,190,0.4)";
       ds.borderColor = warna;
       ds.backgroundColor = warna;
+      ds.pointBackgroundColor = warna;
+      ds.pointBorderColor = warna;
+      ds.pointHoverBackgroundColor = warna;
+      ds.pointHoverBorderColor = warna;
       ds.borderWidth = f && aktif ? 3.5 : f ? 1.5 : 2.5;
       ds.pointRadius = f && !aktif ? 2 : 4;
       ds.order = aktif ? 0 : 2;
