@@ -745,7 +745,7 @@ table.tabel-dashboard-anomali th {
 }
 table.tabel-dashboard-anomali td.nama {
   text-align: left; font-weight: bold; vertical-align: middle;
-  background-color: #f4f9f6;
+  background-color: var(--putih);
 }
 table.tabel-dashboard-anomali td.sph-cell { text-align: left; }
 /* Pemisah antar KELOMPOK KABUPATEN (bukan per baris) -- tiap kabupaten
@@ -753,12 +753,6 @@ table.tabel-dashboard-anomali td.sph-cell { text-align: left; }
    muda vs putih, SEMUA sel dalam grup itu ikut (termasuk sel Kabupaten
    yang di-rowspan), supaya batas antar kabupaten kelihatan jelas walau
    sebelumnya cuma beda garis tipis antar baris. */
-table.tabel-dashboard-anomali tr.grup-abu td {
-  background-color: #f3f6f4;
-}
-table.tabel-dashboard-anomali tr.grup-abu td.nama {
-  background-color: #e9f2ee;
-}
 /* Garis atas lebih tebal di baris PERTAMA tiap kabupaten baru -- jadi
    batasnya tetap tegas dilihat walau warna latar kebetulan sama dgn
    kabupaten sebelumnya (mis. kab ganjil ke-1 vs kab ganjil ke-3, dst). */
