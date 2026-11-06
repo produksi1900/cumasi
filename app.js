@@ -2290,6 +2290,14 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
 
   let nilaiTersimpan = nilaiSaatIni || "";
 
+  const tampil = document.createElement("div");
+  tampil.className = "rincian-tampil";
+  const setTampil = () => {
+    const v = sel.value === "__lain__" ? nilaiTersimpan : sel.value;
+    tampil.textContent = v === "Belum Habis" ? "Belum\nHabis" : (v || "— Pilih —");
+  };
+  setTampil();
+
   sel.addEventListener("change", async () => {
     if (sel.value === "__lain__") {
       const teks = (prompt("Tulis rincian anomali (custom):") || "").trim();
@@ -2299,10 +2307,15 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
       sel.value = teks;
     }
     nilaiTersimpan = sel.value;
+    setTampil();
     await simpanKolomAnomali(rowId, "rincian", sel.value);
   });
 
-  td.appendChild(sel);
+  const wrapR = document.createElement("div");
+  wrapR.className = "rincian-wrap";
+  wrapR.appendChild(tampil);
+  wrapR.appendChild(sel);
+  td.appendChild(wrapR);
   return td;
 }
 
@@ -2562,7 +2575,18 @@ function renderAnomali(rows) {
     }
     .popup-rentang strong { color: var(--hijau-tua); }
     table.tabel-anomali td.col-rincian, table.tabel-anomali th.col-rincian {
-      width: 140px; min-width: 130px; text-align: center;
+      width: 96px; min-width: 90px; text-align: center;
+    }
+    .rincian-wrap { position: relative; width: 100%; }
+    .rincian-tampil {
+      border: 1px solid #ccc; border-radius: 4px; background: #fff;
+      padding: 4px 18px 4px 6px; font-size: 12px; line-height: 1.3;
+      text-align: left; white-space: pre-line; min-height: 26px;
+      display: flex; align-items: center;
+    }
+    .rincian-tampil::after { content: "▾"; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #555; }
+    table.tabel-anomali .rincian-wrap select.sel-rincian {
+      position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
     }
     table.tabel-dashboard-anomali tr.baris-mulai-kec td { border-top: 1px solid var(--hijau-muda); }
     table.tabel-anomali select.sel-rincian {
