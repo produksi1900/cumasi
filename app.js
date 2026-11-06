@@ -32,7 +32,7 @@ const KAB_ANOMALI_LIST = ["Bangka", "Belitung", "Bangka Barat", "Bangka Tengah",
 const OPSI_RINCIAN = {
   sbs: ["Habis", "Belum Habis", "Harga"],
   tbf: ["Habis", "Belum Habis", "Harga"],
-  th:  ["Habis", "Harga"],
+  th:  ["Habis", "Belum Habis", "Harga"],
   bst: ["Provitas", "Harga"],
 };
 
@@ -939,7 +939,13 @@ function buatTabelRata2PerKab({ judul, tab, cfg, rowsSemua, nPeriode, headerLabe
   return { blok, perKabAvg };
 }
 
-const PALET_WARNA = ["#1f9d6e", "#c0392b", "#2980b9", "#e67e22", "#8e44ad", "#16a085", "#d35400", "#7f8c8d", "#2c3e50", "#f39c12"];
+// Palet kontras tinggi (warna berjauhan) + bentuk titik berbeda per garis
+const PALET_WARNA = [
+  "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+  "#00b3b3", "#f032e6", "#9a6324", "#111111", "#bcbd22",
+  "#808000", "#ff1493", "#1e90ff", "#7f7f7f", "#800000",
+];
+const STYLE_TITIK = ["circle", "rect", "triangle", "rectRot", "star", "cross", "crossRot", "dash"];
 
 function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
   const wrap = document.createElement("div");
@@ -960,6 +966,10 @@ function tambahkanGrafik(area, judul, labelsX, series, yTitle) {
         backgroundColor: PALET_WARNA[i % PALET_WARNA.length],
         spanGaps: true,
         tension: 0,
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointStyle: STYLE_TITIK[i % STYLE_TITIK.length],
       })),
     },
     options: {
@@ -1583,6 +1593,12 @@ async function muatKecamatanKab(kabId) {
 }
 
 function siapkanSlicerAnomali() {
+  // Urutan dropdown: Jenis SPH, Tahun, Bulan/Triwulan, Wilayah
+  const slicerAnomali = $("view-anomali").querySelector(".rekon-slicer");
+  const fieldJenis = $("sel-jenis-anomali").closest(".field");
+  if (slicerAnomali && fieldJenis && slicerAnomali.firstElementChild !== fieldJenis) {
+    slicerAnomali.insertBefore(fieldJenis, slicerAnomali.firstElementChild);
+  }
   isiFilterPeriodeAnomali();
   const selKab = $("sel-kab-anomali");
   if (isProv()) {
@@ -2391,7 +2407,7 @@ function renderAnomali(rows) {
     const tdNo = editableTd(nilaiNo, "no_urut", provFull && !modeSemua, true);
     tdNo.classList.add("col-no");
 
-    const tdKecamatan = buatTdKecamatan(r.id, r.kecamatan ?? "", provFull, state.daftarKecAktif);
+    const tdKecamatan = buatTdKecamatan(r.id, r.kecamatan ?? "", provFull, state.kecamatanPerKab[r.kab_id] || state.daftarKecAktif);
     tdKecamatan.classList.add("col-kecamatan");
 
     const tdKomoditi = buatTdKomoditi(r.id, r.nama_komoditi ?? "", provFull);
@@ -2504,6 +2520,7 @@ function renderAnomali(rows) {
     table.tabel-anomali td.col-rincian, table.tabel-anomali th.col-rincian {
       width: 110px; min-width: 100px; text-align: center;
     }
+    table.tabel-dashboard-anomali tr.baris-mulai-kec td { border-top: 1px solid var(--hijau-muda); }
     table.tabel-anomali select.sel-rincian {
       width: 100%; padding: 4px 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;
       font-family: inherit;
@@ -3368,7 +3385,7 @@ async function bukaDashboardAnomali() {
     rows = await fetchAllRows((from, to) => {
       let q = supabase
         .from("konfirmasi_anomali")
-        .select("jenis, kab_id, konfirmasi_kabkot, approval_provinsi");
+        .select("jenis, kab_id, kecamatan, konfirmasi_kabkot, approval_provinsi");
       if (!isProv()) q = q.eq("kab_id", state.profile.kab_id);
       if (tahunAktif !== null) q = q.eq("tahun", tahunAktif);
       q = terapkanFilterTriwulanSemuaJenis(q);
@@ -3379,6 +3396,7 @@ async function bukaDashboardAnomali() {
     return;
   }
 
+  await Promise.all(kabList.map((k) => muatKecamatanKab(k).catch(() => [])));
   state.dashboardAnomaliAktif = true;
   perbaruiTombolDashboardAnomali();
   renderDashboardAnomali(rows, kabList, tahunAktif, triwulanAnomaliAktif());
@@ -3392,21 +3410,24 @@ function fmtCountPct(count, total) {
 
 function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
   const area = $("anomali-area");
+  const statKosong = () => ({ total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 });
+  const tambahStat = (t, s) => { for (const k in t) t[k] += s[k]; };
 
-  const map = new Map();
-  for (const kab of kabList) {
-    for (const jenis of JENIS_LIST_DASHBOARD) {
-      map.set(`${kab}|${jenis}`, {
-        total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0,
-        approvalYa: 0, approvalTidak: 0, approvalBelum: 0,
-      });
-    }
-  }
-
+  // kab -> kecKey -> { nama, jenis: { sbs: stat, ... } }
+  const perKab = new Map(kabList.map((k) => [k, new Map()]));
   for (const r of rows) {
-    const key = `${r.kab_id}|${r.jenis}`;
-    if (!map.has(key)) continue;
-    const s = map.get(key);
+    const kabMap = perKab.get(r.kab_id);
+    if (!kabMap) continue;
+    const kecKey = keyKecamatan(r.kecamatan) || "_kosong";
+    if (!kabMap.has(kecKey)) {
+      const nama = r.kecamatan && String(r.kecamatan).trim()
+        ? cariNamaKecKanonik(String(r.kecamatan).trim(), state.kecamatanPerKab[r.kab_id])
+        : "(Belum diisi)";
+      kabMap.set(kecKey, { nama, jenis: {} });
+    }
+    const kec = kabMap.get(kecKey);
+    if (!kec.jenis[r.jenis]) kec.jenis[r.jenis] = statKosong();
+    const s = kec.jenis[r.jenis];
     s.total++;
     const sudah = r.konfirmasi_kabkot && String(r.konfirmasi_kabkot).trim() !== "";
     if (sudah) s.sudahKonfirmasi++; else s.belumKonfirmasi++;
@@ -3415,49 +3436,9 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
     else s.approvalBelum++;
   }
 
-  const totalRow = { total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 };
-
-  let bodyRows = "";
-  let grupKeIdx = 0;
-
-  for (const kab of kabList) {
-    const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kab);
-    const labelKab = kabEntry ? kabEntry.nama : kab;
-
-    const jenisTerisi = JENIS_LIST_DASHBOARD.filter((jenis) => map.get(`${kab}|${jenis}`).total > 0);
-    if (jenisTerisi.length === 0) continue;
-
-    const clsGrup = grupKeIdx % 2 === 1 ? " grup-abu" : "";
-    grupKeIdx++;
-
-    const subTotalKab = { total: 0, sudahKonfirmasi: 0, belumKonfirmasi: 0, approvalYa: 0, approvalTidak: 0, approvalBelum: 0 };
-
-    jenisTerisi.forEach((jenis, idx) => {
-      const s = map.get(`${kab}|${jenis}`);
-
-      totalRow.total += s.total;
-      totalRow.sudahKonfirmasi += s.sudahKonfirmasi;
-      totalRow.belumKonfirmasi += s.belumKonfirmasi;
-      totalRow.approvalYa += s.approvalYa;
-      totalRow.approvalTidak += s.approvalTidak;
-      totalRow.approvalBelum += s.approvalBelum;
-
-      subTotalKab.total += s.total;
-      subTotalKab.sudahKonfirmasi += s.sudahKonfirmasi;
-      subTotalKab.belumKonfirmasi += s.belumKonfirmasi;
-      subTotalKab.approvalYa += s.approvalYa;
-      subTotalKab.approvalTidak += s.approvalTidak;
-      subTotalKab.approvalBelum += s.approvalBelum;
-
-      const tdKab = idx === 0
-        ? `<td class="nama" rowspan="${jenisTerisi.length}">${labelKab}</td>`
-        : "";
-
-      const clsMulai = idx === 0 ? " baris-mulai-kab" : "";
-
-      bodyRows += `<tr class="${clsGrup}${clsMulai}">
-        ${tdKab}
-        <td class="sph-cell">${SPH_CONFIG[jenis].label}</td>
+  const barisHtml = (tdAwal, label, s, cls) => `<tr class="${cls}">
+        ${tdAwal}
+        <td class="sph-cell">${label}</td>
         <td>${s.total}</td>
         <td>${fmtCountPct(s.sudahKonfirmasi, s.total)}</td>
         <td>${s.belumKonfirmasi}</td>
@@ -3465,11 +3446,58 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
         <td>${s.approvalTidak}</td>
         <td>${s.approvalBelum}</td>
       </tr>`;
+
+  const totalRow = statKosong();
+  let bodyRows = "";
+  let grupKeIdx = 0;
+
+  for (const kab of kabList) {
+    const kabEntry = DAFTAR_KAB_BABEL.find((k) => k.id === kab);
+    const labelKab = kabEntry ? kabEntry.nama : kab;
+    const kabMap = perKab.get(kab);
+    if (!kabMap || kabMap.size === 0) continue;
+
+    const urutKec = state.kecamatanPerKab[kab] || [];
+    const kecList = Array.from(kabMap.entries()).map(([key, v]) => ({ key, ...v }))
+      .sort((a, b) => {
+        const ia = urutKec.findIndex((n) => keyKecamatan(n) === a.key);
+        const ib = urutKec.findIndex((n) => keyKecamatan(n) === b.key);
+        const va = ia === -1 ? 9999 : ia, vb = ib === -1 ? 9999 : ib;
+        if (va !== vb) return va - vb;
+        return a.nama.localeCompare(b.nama, "id");
+      });
+
+    const jenisPerKec = kecList.map((k) => JENIS_LIST_DASHBOARD.filter((j) => k.jenis[j] && k.jenis[j].total > 0));
+    const totalBarisKab = jenisPerKec.reduce((n, arr) => n + arr.length, 0);
+    if (totalBarisKab === 0) continue;
+
+    const clsGrup = grupKeIdx % 2 === 1 ? " grup-abu" : "";
+    grupKeIdx++;
+    const subTotalKab = statKosong();
+    let barisKeKab = 0;
+
+    kecList.forEach((kec, ki) => {
+      const jenisTerisi = jenisPerKec[ki];
+      jenisTerisi.forEach((jenis, idx) => {
+        const s = kec.jenis[jenis];
+        tambahStat(totalRow, s);
+        tambahStat(subTotalKab, s);
+
+        let tdAwal = "";
+        if (barisKeKab === 0) tdAwal += `<td class="nama" rowspan="${totalBarisKab}">${labelKab}</td>`;
+        if (idx === 0) tdAwal += `<td class="sph-cell" rowspan="${jenisTerisi.length}">${kec.nama}</td>`;
+
+        let cls = clsGrup.trim();
+        if (barisKeKab === 0) cls += " baris-mulai-kab";
+        else if (idx === 0) cls += " baris-mulai-kec";
+        bodyRows += barisHtml(tdAwal, SPH_CONFIG[jenis].label, s, cls);
+        barisKeKab++;
+      });
     });
 
-    if (jenisTerisi.length > 1) {
-      bodyRows += `<tr class="${clsGrup} baris-subtotal-kab">
-        <td colspan="2">Subtotal ${labelKab}</td>
+    if (totalBarisKab > 1) {
+      bodyRows += `<tr class="${clsGrup.trim()} baris-subtotal-kab">
+        <td colspan="3">Subtotal ${labelKab}</td>
         <td>${subTotalKab.total}</td>
         <td>${fmtCountPct(subTotalKab.sudahKonfirmasi, subTotalKab.total)}</td>
         <td>${subTotalKab.belumKonfirmasi}</td>
@@ -3498,7 +3526,7 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
       <table class="tabel-dashboard-anomali">
         <thead>
           <tr>
-            <th>Kabupaten</th><th>SPH</th><th>Total Anomali</th>
+            <th>Kabupaten</th><th>Kecamatan</th><th>SPH</th><th>Total Anomali</th>
             <th>Sudah Konfirmasi</th><th>Belum Konfirmasi</th>
             <th>Approval: Ya</th><th>Approval: Tidak</th><th>Approval: Belum</th>
           </tr>
@@ -3506,7 +3534,7 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
         <tbody>
           ${bodyRows}
           <tr class="baris-total-dashboard">
-            <td colspan="2">TOTAL</td>
+            <td colspan="3">TOTAL</td>
             <td>${totalRow.total}</td>
             <td>${fmtCountPct(totalRow.sudahKonfirmasi, totalRow.total)}</td>
             <td>${totalRow.belumKonfirmasi}</td>

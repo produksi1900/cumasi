@@ -89,25 +89,29 @@ export const SPH_CONFIG = {
     periodeCol: "triwulan",
     periodeLabels: ["1", "2", "3", "4"],
     judulPeriode: "Triwulan",
+    // SPH-TH: provitas dalam Pohon/M2, luas panen dalam M2
+    // (produksi dalam Pohon). Ada tab Habis, Belum Habis & Harga.
     tabs: [
-      { key: "provitas_habis", label: "Provitas Habis", satuan: "Kw/Ha",
+      { key: "provitas_habis", label: "Provitas Habis", satuan: "Pohon/M2",
         numer: "produksi_habis", denom: "luas_panen_habis",
         rawNumer: { label: "Produksi Habis", satuan: "Pohon", factor: 1 },
-        rawDenom: { label: "Luas Panen Habis", satuan: "Ha", factor: 1 } },
+        rawDenom: { label: "Luas Panen Habis", satuan: "M2", factor: 1 } },
+      { key: "provitas_belum", label: "Provitas Belum Habis", satuan: "Pohon/M2",
+        numer: "produksi_belum_habis", denom: "luas_panen_belum_habis",
+        rawNumer: { label: "Produksi Belum Habis", satuan: "Pohon", factor: 1 },
+        rawDenom: { label: "Luas Panen Belum Habis", satuan: "M2", factor: 1 } },
       { key: "harga", label: "Harga Jual Petani", satuan: "Rp/Kg", single: "harga_jual_petani" },
     ],
-    // TH tidak punya "belum habis", tapi kolomnya tetap disertakan di
-    // Excel (fitur_rekon.py tidak masalah kalau kolom "belum" ikut ada --
-    // label_jenis="th" yang menentukan tab mana yang ditampilkan, bukan
-    // ada/tidaknya kolom di file).
     excelCols: {
-      luas_awal_laporan:  "Luas awal laporan (M2)",
-      luas_panen_habis:   "Luas panen habis (M2)",
-      luas_rusak:         "Luas rusak (M2)",
-      luas_tanam:         "Luas tanam (M2)",
-      luas_tanaman_akhir: "Luas tanaman akhir (M2)",
-      produksi_habis:     "Produksi Habis (Kg)",
-      harga_jual_petani:  "Harga jual petani (Rp/kg)",
+      luas_awal_laporan:      "Luas awal laporan (M2)",
+      luas_panen_habis:       "Luas panen habis (M2)",
+      luas_panen_belum_habis: "Luas panen belum habis (M2)",
+      luas_rusak:             "Luas rusak (M2)",
+      luas_tanam:             "Luas tanam (M2)",
+      luas_tanaman_akhir:     "Luas tanaman akhir (M2)",
+      produksi_habis:         "Produksi Habis (Kg)",
+      produksi_belum_habis:   "Produksi belum habis (Kg)",
+      harga_jual_petani:      "Harga jual petani (Rp/kg)",
     },
     rangkuman: { produksiCol: "produksi_habis", factor: 1, satuan: "Pohon" },
   },
@@ -148,16 +152,7 @@ export const SPH_CONFIG = {
 // PENTING: "id" di sini WAJIB sama persis (termasuk kapitalisasi & spasi)
 // dengan isi kolom "nama_kab" di database Supabase, karena app.js
 // memfilter data pakai .eq("nama_kab", id) -- bukan pakai kode kabupaten.
-// Sudah dikonfirmasi lewat SQL langsung ke tabel data_* (bukan tebakan):
-//   select distinct kab, nama_kab from data_bst order by kab;
-// "Kota Pangkal Pinang" MEMAKAI SPASI antara "Pangkal" dan "Pinang" --
-// ini sempat salah ditulis "Kota Pangkalpinang" (tanpa spasi) di versi
-// lama, yang menyebabkan filter kabupaten ini gagal match dgn database
-// (lihat juga kab_id di tabel profiles & konfirmasi_anomali, WAJIB
-// disamakan persis ke "Kota Pangkal Pinang" juga -- lihat DEPLOY.md/SQL
-// migrasi terkait). Kalau ada kabupaten lain yang datanya baru mulai
-// tersinkron dari aplikasi desktop, jalankan ulang query di atas dan
-// cocokkan/perbaiki nilai "id" di bawah ini kalau ternyata beda.
+// "Kota Pangkal Pinang" MEMAKAI SPASI antara "Pangkal" dan "Pinang".
 export const DAFTAR_KAB_BABEL = [
   { id: "Bangka", nama: "Kab. Bangka" },
   { id: "Belitung", nama: "Kab. Belitung" },
@@ -192,7 +187,7 @@ export const VARIABEL_RANGKUMAN = {
   sbs: [..._luas("Ha"), ..._prod("Kuintal"), _harga],
   tbf: [..._luas("M2"), ..._prod("Kg"),      _harga],
   th:  [
-    { key: "luas_habis", label: "Luas Panen Habis", satuan: "Ha", mode: "sum", cols: ["luas_panen_habis"] },
+    { key: "luas_habis", label: "Luas Panen Habis", satuan: "M2", mode: "sum", cols: ["luas_panen_habis"] },
     { key: "prod_habis", label: "Produksi Habis", satuan: "Pohon", mode: "sum", cols: ["produksi_habis"] },
     _harga,
   ],
