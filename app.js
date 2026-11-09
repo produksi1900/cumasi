@@ -28,21 +28,36 @@ const TAHUN_AWAL = 2018;
 const TAHUN_SEKARANG = new Date().getFullYear();
 const KAB_ANOMALI_LIST = ["Bangka", "Belitung", "Bangka Barat", "Bangka Tengah", "Bangka Selatan", "Belitung Timur", "Kota Pangkal Pinang"];
 
+// Nama kecamatan lama/usang yang TIDAK boleh muncul di dropdown Kecamatan
+// (Konfirmasi Anomali). Ditulis dalam bentuk kunci: huruf kecil, tanpa spasi.
+// "Lepar Pongok" sudah dimekarkan jadi "Lepar" + "Kepulauan Pongok".
+const KECAMATAN_DIABAIKAN = ["leparpongok"];
+
 // Pilihan "Rincian" anomali per jenis SPH (bisa ditambah lewat "Lainnya...").
 const OPSI_RINCIAN = {
-  sbs: ["Habis", "Belum Habis", "Harga"],
-  tbf: ["Habis", "Belum Habis", "Harga"],
-  th:  ["Habis", "Belum Habis", "Harga"],
+  sbs: ["Provitas Habis", "Provitas Belum Habis", "Harga"],
+  tbf: ["Provitas Habis", "Provitas Belum Habis", "Harga"],
+  th:  ["Provitas Habis", "Provitas Belum Habis", "Harga"],
   bst: ["Provitas", "Harga"],
 };
 
 // Label rincian otomatis dari tab provitas/harga (dipakai saat Generate Anomali)
 function rincianDariTab(tab) {
-  if (tab.key === "provitas_habis") return "Habis";
-  if (tab.key === "provitas_belum") return "Belum Habis";
+  if (tab.key === "provitas_habis") return "Provitas Habis";
+  if (tab.key === "provitas_belum") return "Provitas Belum Habis";
   if (tab.key === "harga") return "Harga";
   if (tab.key === "provitas") return "Provitas";
   return tab.label || "";
+}
+
+// Samakan penulisan lama ("Habis"/"Belum Habis") dengan yang baru
+// ("Provitas Habis"/"Provitas Belum Habis") supaya pengecekan duplikat
+// saat Generate Anomali tetap akurat utk data lama.
+function normalisasiRincian(r) {
+  const s = String(r ?? "").trim().toLowerCase();
+  if (s === "habis") return "provitas habis";
+  if (s === "belum habis") return "provitas belum habis";
+  return s;
 }
 
 // ============================================================
@@ -1635,6 +1650,8 @@ async function muatKecamatanKab(kabId) {
   for (const r of semua) {
     if (!r.nama_kec) continue;
     const key = keyKec(r.nama_kec);
+    // Lewati nama kecamatan lama/usang (mis. "Lepar Pongok").
+    if (KECAMATAN_DIABAIKAN.includes(key)) continue;
     if (!grup.has(key)) grup.set(key, { urutan: r.urutkec ?? 0, varian: new Map() });
     const g = grup.get(key);
     g.varian.set(r.nama_kec, (g.varian.get(r.nama_kec) || 0) + 1);
@@ -2286,7 +2303,7 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
   }
 
   const opsi = [...(OPSI_RINCIAN[jenis] || [])];
-  if (nilaiSaatIni && !opsi.includes(nilaiSaatIni)) opsi.push(nilaiSaatIni); // nilai custom lama tetap tampil
+  if (nilaiSaatIni && !opsi.includes(nilaiSaatIni)) opsi.push(nilaiSaatIni); // nilai custom/lama tetap tampil
 
   const sel = document.createElement("select");
   sel.className = "sel-rincian";
@@ -2316,7 +2333,12 @@ function buatTdRincian(rowId, nilaiSaatIni, editable, jenis) {
   tampil.className = "rincian-tampil";
   const setTampil = () => {
     const v = sel.value === "__lain__" ? nilaiTersimpan : sel.value;
-    tampil.textContent = v === "Belum Habis" ? "Belum\nHabis" : (v || "— Pilih —");
+    // Pecah baris supaya muat di kolom yang sempit.
+    let teks = v || "— Pilih —";
+    if (v === "Provitas Belum Habis") teks = "Provitas\nBelum Habis";
+    else if (v === "Provitas Habis") teks = "Provitas\nHabis";
+    else if (v === "Belum Habis") teks = "Belum\nHabis";
+    tampil.textContent = teks;
   };
   setTampil();
 
@@ -2597,7 +2619,7 @@ function renderAnomali(rows) {
     }
     .popup-rentang strong { color: var(--hijau-tua); }
     table.tabel-anomali td.col-rincian, table.tabel-anomali th.col-rincian {
-      width: 96px; min-width: 90px; text-align: center;
+      width: 112px; min-width: 104px; text-align: center;
     }
     .rincian-wrap { position: relative; width: 100%; }
     .rincian-tampil {
@@ -2960,7 +2982,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
 
     const cfg = SPH_CONFIG[jenis];
     const tabUtama = cfg.tabs.find((t) => !t.single) || cfg.tabs[0];
-    const rincianOtomatis = rincianDariTab(tabUtama); // mis. "Habis" / "Provitas"
+    const rincianOtomatis = rincianDariTab(tabUtama); // mis. "Provitas Habis" / "Provitas"
 
     const rows = await fetchAllRows((from, to) =>
       supabase.from(cfg.table).select("*").eq("tahun", tahun).eq("nama_kab", kabId).range(from, to)
@@ -2976,11 +2998,12 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
     );
     // Dedup: kombinasi kec+komoditi+periode+rincian. Baris lama yang rinciannya
     // masih kosong dianggap cocok utk rincian apa pun (supaya tidak dobel).
+    // Penulisan lama ("Habis"/"Belum Habis") disamakan dgn yang baru.
     const keyDasar = (e) => `${normalisasiNamaTanaman(e.kecamatan)}|${normalisasiNamaTanaman(e.nama_komoditi)}|${e.bulan}`;
     const existSet = new Set();
     const existKosong = new Set();
     for (const e of existing || []) {
-      if (e.rincian) existSet.add(`${keyDasar(e)}|${normalisasiNamaTanaman(e.rincian)}`);
+      if (e.rincian) existSet.add(`${keyDasar(e)}|${normalisasiRincian(e.rincian)}`);
       else existKosong.add(keyDasar(e));
     }
     let noUrut = existing?.length || 0;
@@ -3017,7 +3040,7 @@ async function generateAnomaliUntukSatuKab(kabId, tahun, log) {
         const namaKec = cariNamaKecKanonik(namaKecAsli, daftarKecKanonik);
 
         const dasar = `${normalisasiNamaTanaman(namaKec)}|${normalisasiNamaTanaman(komoditi)}|${per}`;
-        const dupKey = `${dasar}|${normalisasiNamaTanaman(rincianOtomatis)}`;
+        const dupKey = `${dasar}|${normalisasiRincian(rincianOtomatis)}`;
         if (existSet.has(dupKey) || existKosong.has(dasar)) continue;
         existSet.add(dupKey);
 
@@ -3257,7 +3280,7 @@ $("btn-download-anomali-kabkot")?.addEventListener("click", downloadAnomaliExcel
 
 // Kolom "ID" WAJIB di posisi pertama (dipakai kabkot saat upload balik konfirmasi).
 const ANOMALI_HEADERS = ["ID", "No", "Tahun", "Kabupaten/Kota", "Kecamatan", "Bulan", "Nama Komoditi", "Rincian", "Kalimat Anomali", "Tindak Lanjut", "Konfirmasi Kabkot", "Approval"];
-const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 14 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
+const ANOMALI_COL_WIDTHS = [{ wch: 8 }, { wch: 6 }, { wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 16 }];
 
 function tulisSheetAnomaliDariRows(wb, sheetName, rows, jenis) {
   const ws = {};
