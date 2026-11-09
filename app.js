@@ -3662,6 +3662,21 @@ function renderDashboardAnomali(rows, kabList, tahunAktif, twAktif) {
 }
 
 // ============================================================
+// Tutup otomatis dropdown combobox (Kecamatan/Komoditi/Bulan) saat halaman
+// atau tabel discroll. Scroll tidak "bubble", jadi dipasang di fase capture.
+// Scroll DI DALAM daftar dropdown itu sendiri diabaikan.
+// ============================================================
+document.addEventListener("scroll", (e) => {
+  const target = e.target;
+  if (target && target.nodeType === 1 && target.closest && target.closest(".combo-list")) return;
+  const terbuka = document.querySelectorAll(".combo-list:not(.hidden)");
+  if (terbuka.length === 0) return;
+  terbuka.forEach((l) => l.classList.add("hidden"));
+  const aktif = document.activeElement;
+  if (aktif && aktif.closest && aktif.closest(".combo-wrap")) aktif.blur();
+}, true);
+
+// ============================================================
 // Mulai
 // ============================================================
 cekSesiAwal();
