@@ -2608,6 +2608,8 @@ function renderAnomali(rows) {
     const tdTindakLanjut = buatTdTindakLanjut(r.id, r.tindak_lanjut ?? "", bisaIsiKonfirmasi);
     tdTindakLanjut.classList.add("col-tindak-lanjut");
 
+    // Konfirmasi Kabkot boleh ditulis kabkot DAN Provinsi penuh
+    // (Provinsi terbatas tetap read-only, juga diblokir RLS di database).
     const tdKabkot = editableTd(r.konfirmasi_kabkot ?? "", "konfirmasi_kabkot", bisaIsiKonfirmasi, false);
     tdKabkot.classList.add("col-kabkot");
 
@@ -2801,8 +2803,11 @@ function editableTd(value, field, editable, isNumber) {
 async function simpanKolomAnomali(id, field, value) {
   batalkanSimpanTertunda(id, field);
   try {
-    const { error } = await supabase.from("konfirmasi_anomali").update({ [field]: value }).eq("id", id);
+    const { data, error } = await supabase.from("konfirmasi_anomali").update({ [field]: value }).eq("id", id).select("id");
     if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error("Ditolak database (0 baris terupdate). Kemungkinan akun ini tidak punya izin UPDATE di tabel konfirmasi_anomali (RLS Supabase).");
+    }
     // Sinkronkan cache lokal supaya sort tidak me-render data lama.
     const row = state.anomaliRows.find((r) => r.id === id);
     if (row) row[field] = value;
