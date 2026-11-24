@@ -84,6 +84,89 @@ async function fetchAllRows(queryFn) {
 // ============================================================
 const $ = (id) => document.getElementById(id);
 
+// ============================================================
+// AUTOSAVE Konfirmasi Anomali
+// - Tersimpan otomatis ±0,8 detik setelah berhenti mengetik (tidak perlu
+//   klik di luar kotak dulu).
+// - Kalau halaman di-refresh/ditutup saat masih ada yang belum tersimpan:
+//   (1) browser menampilkan peringatan, (2) sisa data dikirim paksa lewat
+//   fetch keepalive supaya tetap sampai walau halaman ditutup.
+// ============================================================
+let tokenAkses = null;
+supabase.auth.onAuthStateChange((_ev, session) => {
+  tokenAkses = session?.access_token || null;
+});
+const simpanTertunda = new Map(); // key "id|field" -> { id, field, value, timer }
+const JEDA_AUTOSAVE_MS = 800;
+
+function tampilStatusSimpan(teks, warna) {
+  let el = document.getElementById("badge-status-simpan");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "badge-status-simpan";
+    el.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:300;padding:6px 12px;" +
+      "border-radius:6px;font-size:12px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);" +
+      "transition:opacity .3s;opacity:0;pointer-events:none;";
+    document.body.appendChild(el);
+  }
+  el.textContent = teks;
+  el.style.background = warna;
+  el.style.opacity = "1";
+  clearTimeout(el._t);
+  if (warna !== "#e67e22") el._t = setTimeout(() => { el.style.opacity = "0"; }, 1500);
+}
+
+function jadwalkanSimpanAnomali(id, field, value) {
+  const key = `${id}|${field}`;
+  const lama = simpanTertunda.get(key);
+  if (lama) clearTimeout(lama.timer);
+  const timer = setTimeout(async () => {
+    simpanTertunda.delete(key);
+    await simpanKolomAnomali(id, field, value);
+  }, JEDA_AUTOSAVE_MS);
+  simpanTertunda.set(key, { id, field, value, timer });
+  tampilStatusSimpan("Menyimpan...", "#e67e22");
+}
+
+function batalkanSimpanTertunda(id, field) {
+  const key = `${id}|${field}`;
+  const p = simpanTertunda.get(key);
+  if (p) { clearTimeout(p.timer); simpanTertunda.delete(key); }
+}
+
+// Kirim semua yang masih tertunda SEKARANG (dipakai saat halaman mau ditutup).
+function kirimSisaSimpanPaksa() {
+  if (simpanTertunda.size === 0) return;
+  for (const p of simpanTertunda.values()) {
+    clearTimeout(p.timer);
+    try {
+      fetch(`${SUPABASE_URL}/rest/v1/konfirmasi_anomali?id=eq.${encodeURIComponent(p.id)}`, {
+        method: "PATCH",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${tokenAkses || SUPABASE_KEY}`,
+        },
+        body: JSON.stringify({ [p.field]: p.value }),
+      });
+    } catch (e) { /* abaikan */ }
+  }
+  simpanTertunda.clear();
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (simpanTertunda.size > 0) {
+    kirimSisaSimpanPaksa();
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+window.addEventListener("pagehide", kirimSisaSimpanPaksa);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") kirimSisaSimpanPaksa();
+});
+
 function autoGrowTextarea(el) {
   el.style.height = "auto";
   el.style.height = el.scrollHeight + "px";
@@ -2653,6 +2736,9 @@ function buatTdKalimat(r, editable) {
   if (editable) {
     teks.contentEditable = "true";
     teks.spellcheck = false;
+    teks.addEventListener("input", () => {
+      jadwalkanSimpanAnomali(r.id, "kalimat_anomali", teks.textContent.trim());
+    });
     teks.addEventListener("blur", async () => {
       await simpanKolomAnomali(r.id, "kalimat_anomali", teks.textContent.trim());
     });
@@ -2695,23 +2781,34 @@ function editableTd(value, field, editable, isNumber) {
   }
   td.contentEditable = "true";
   td.spellcheck = false;
-  td.addEventListener("blur", async () => {
+  const ambilNilai = () => {
     let v = td.textContent.trim();
     if (isNumber) v = Number(v) || 0;
+    return v;
+  };
+  td.addEventListener("input", () => {
     const tr = td.closest("tr");
-    await simpanKolomAnomali(Number(tr.dataset.id), field, v);
+    if (tr) jadwalkanSimpanAnomali(Number(tr.dataset.id), field, ambilNilai());
+  });
+  td.addEventListener("blur", async () => {
+    const tr = td.closest("tr");
+    if (!tr) return;
+    await simpanKolomAnomali(Number(tr.dataset.id), field, ambilNilai());
   });
   return td;
 }
 
 async function simpanKolomAnomali(id, field, value) {
+  batalkanSimpanTertunda(id, field);
   try {
     const { error } = await supabase.from("konfirmasi_anomali").update({ [field]: value }).eq("id", id);
     if (error) throw error;
     // Sinkronkan cache lokal supaya sort tidak me-render data lama.
     const row = state.anomaliRows.find((r) => r.id === id);
     if (row) row[field] = value;
+    if (simpanTertunda.size === 0) tampilStatusSimpan("✓ Tersimpan", "#1f9d6e");
   } catch (e) {
+    tampilStatusSimpan("✗ Gagal menyimpan", "#c0392b");
     alert("Gagal menyimpan: " + e.message);
   }
 }
