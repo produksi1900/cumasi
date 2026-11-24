@@ -362,6 +362,11 @@ async function masukKeApp() {
   await muatData();
 
   mulaiRotasiInfo();
+
+  // Kembali ke tab yang terakhir dibuka sebelum refresh.
+  let viewTersimpan = null;
+  try { viewTersimpan = sessionStorage.getItem(KUNCI_VIEW_TERAKHIR); } catch (e) { /* abaikan */ }
+  if (viewTersimpan === "anomali" || viewTersimpan === "rangkuman") gantiView(viewTersimpan);
 }
 
 function keluarDariApp() {
@@ -432,7 +437,10 @@ $("btn-logout").addEventListener("click", async () => {
 // ============================================================
 // TOGGLE PANEL KANAN
 // ============================================================
+const KUNCI_VIEW_TERAKHIR = "cumasi_view_terakhir";
 function gantiView(view) {
+  // Ingat tab terakhir supaya setelah refresh tidak balik ke Rekonsiliasi.
+  try { sessionStorage.setItem(KUNCI_VIEW_TERAKHIR, view); } catch (e) { /* abaikan */ }
   // Simpan posisi scroll Konfirmasi Anomali sebelum pindah menu.
   const areaAnomali = $("anomali-area");
   if (!$("view-anomali").classList.contains("hidden") && view !== "anomali") {
